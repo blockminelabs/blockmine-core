@@ -1,0 +1,22 @@
+[features]
+seeds = false
+skip-lint = false
+
+[programs.localnet]
+blockmine = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw"
+
+[programs.devnet]
+blockmine = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npm run test"
+
+[workspace]
+types = "target/types"

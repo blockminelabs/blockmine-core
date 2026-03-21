@@ -1,0 +1,9 @@
+pub mod benchmark;
+pub mod desktop;
+pub mod init_protocol;
+pub mod list_devices;
+pub mod mine;
+pub mod protocol_state;
+pub mod register;
+pub mod submit_test;
+pub mod wallet_stats;
