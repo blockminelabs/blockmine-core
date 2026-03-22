@@ -1374,16 +1374,13 @@ impl App for BlockMineStudioApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
-
                     ui.columns(2, |columns| {
                         render_wallet_card(&mut columns[0], self);
-                        render_hashrate_signal_card(&mut columns[1], self);
-                    });
-
-                    ui.add_space(14.0);
-
-                    ui.columns(2, |columns| {
+                        columns[0].add_space(14.0);
                         render_miner_controls_card(&mut columns[0], self);
+
+                        render_hashrate_signal_card(&mut columns[1], self);
+                        columns[1].add_space(14.0);
                         render_live_telemetry_card(&mut columns[1], self);
                     });
                 });
@@ -1391,10 +1388,15 @@ impl App for BlockMineStudioApp {
 
         if self.show_deposit_modal {
             let mut open = true;
+            let modal_size = match (self.deposit_modal_step, self.deposit_method) {
+                (DepositModalStep::Picker, _) => egui::vec2(620.0, 240.0),
+                (DepositModalStep::Details, DepositMethod::Web3Wallet) => egui::vec2(620.0, 290.0),
+                (DepositModalStep::Details, DepositMethod::ManualSend) => egui::vec2(620.0, 240.0),
+            };
             egui::Window::new("Fund desktop wallet")
                 .collapsible(false)
                 .resizable(false)
-                .default_width(620.0)
+                .fixed_size(modal_size)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     let wallet_address = self
@@ -1439,15 +1441,14 @@ impl App for BlockMineStudioApp {
                                 .rounding(egui::Rounding::same(18.0))
                                 .inner_margin(egui::Margin::same(18.0))
                                 .show(ui, |ui| {
-                                    let hint = match self.deposit_method {
-                                        DepositMethod::Web3Wallet => "Set the amount, then open the browser bridge. Your wallet extension prepares the transfer for the desktop miner.",
-                                        DepositMethod::ManualSend => "Copy the desktop wallet address and send SOL manually from any external Solana wallet.",
-                                    };
-                                    ui.label(RichText::new(hint).color(theme_muted()));
-                                    ui.add_space(10.0);
-                                    labeled_value(ui, "Desktop wallet", wallet_address.clone());
-                                    ui.add_space(10.0);
                                     if matches!(self.deposit_method, DepositMethod::Web3Wallet) {
+                                        ui.label(
+                                            RichText::new(
+                                                "Open the browser bridge and approve the transfer from your wallet.",
+                                            )
+                                            .color(theme_muted()),
+                                        );
+                                        ui.add_space(10.0);
                                         ui.label(RichText::new("Select amount").color(theme_accent()));
                                         ui.add(
                                             egui::Slider::new(&mut self.web3_deposit_sol, 0.1..=100.0)
@@ -1464,47 +1465,82 @@ impl App for BlockMineStudioApp {
                                             .color(theme_muted()),
                                         );
                                         ui.add_space(10.0);
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    RichText::new("Open Web3 Wallet")
-                                                        .color(theme_button_text()),
+                                        ui.horizontal(|ui| {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new("Open Web3 Wallet")
+                                                            .color(theme_button_text()),
+                                                    )
+                                                    .fill(theme_accent())
+                                                    .min_size(egui::vec2(240.0, 42.0)),
                                                 )
-                                                .fill(theme_accent())
-                                                .min_size(egui::vec2(240.0, 42.0)),
+                                                .clicked()
+                                            {
+                                                self.open_web3_deposit_flow();
+                                            }
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new("Back")
+                                                            .color(theme_text())
+                                                            .size(14.0),
+                                                    )
+                                                    .fill(theme_card())
+                                                    .min_size(egui::vec2(240.0, 42.0)),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.deposit_modal_step = DepositModalStep::Picker;
+                                            }
+                                        });
+                                    } else {
+                                        ui.label(
+                                            RichText::new(
+                                                "Copy the desktop wallet address and send SOL manually from any external Solana wallet.",
                                             )
-                                            .clicked()
-                                        {
-                                            self.open_web3_deposit_flow();
-                                        }
-                                    } else if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new("Copy wallet address")
-                                                    .color(theme_button_text()),
-                                            )
-                                            .fill(theme_accent())
-                                            .min_size(egui::vec2(240.0, 42.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        ui.ctx().copy_text(wallet_address.clone());
-                                        self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
-                                        self.error = None;
+                                            .color(theme_muted()),
+                                        );
+                                        ui.add_space(10.0);
+                                        ui.label(
+                                            RichText::new(wallet_address.clone())
+                                                .monospace()
+                                                .color(theme_text()),
+                                        );
+                                        ui.add_space(12.0);
+                                        ui.horizontal(|ui| {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new("Copy wallet address")
+                                                            .color(theme_button_text()),
+                                                    )
+                                                    .fill(theme_accent())
+                                                    .min_size(egui::vec2(240.0, 42.0)),
+                                                )
+                                                .clicked()
+                                            {
+                                                ui.ctx().copy_text(wallet_address.clone());
+                                                self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
+                                                self.error = None;
+                                            }
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(
+                                                        RichText::new("Back")
+                                                            .color(theme_text())
+                                                            .size(14.0),
+                                                    )
+                                                    .fill(theme_card())
+                                                    .min_size(egui::vec2(240.0, 42.0)),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.deposit_modal_step = DepositModalStep::Picker;
+                                            }
+                                        });
                                     }
-                            });
-                            ui.add_space(10.0);
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                if ui
-                                    .add(
-                                        egui::Button::new(RichText::new("Back").size(11.0))
-                                            .min_size(egui::vec2(68.0, 26.0)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.deposit_modal_step = DepositModalStep::Picker;
-                                }
-                            });
+                                });
                         }
                     }
                 });
@@ -1526,25 +1562,20 @@ impl App for BlockMineStudioApp {
                         .color(theme_muted()),
                     );
                     ui.add_space(14.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {
-                            self.show_seed_phrase_warning_modal = false;
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new("I understand, reveal")
-                                        .color(theme_button_text()),
-                                )
-                                .fill(theme_accent())
-                                .min_size(egui::vec2(180.0, 38.0)),
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new("I understand, reveal!")
+                                    .color(theme_button_text()),
                             )
-                            .clicked()
-                        {
-                            self.show_seed_phrase_warning_modal = false;
-                            self.open_seed_phrase_for_wallet(false);
-                        }
-                    });
+                            .fill(theme_accent())
+                            .min_size(egui::vec2(220.0, 38.0)),
+                        )
+                        .clicked()
+                    {
+                        self.show_seed_phrase_warning_modal = false;
+                        self.open_seed_phrase_for_wallet(false);
+                    }
                 });
             self.show_seed_phrase_warning_modal = self.show_seed_phrase_warning_modal && open;
         }
@@ -1786,18 +1817,16 @@ impl App for BlockMineStudioApp {
         if self.show_era_schedule_modal {
             let mut open = true;
             let modal_size = egui::vec2(
-                (screen_rect.width() - 36.0).max(920.0),
-                (screen_rect.height() - 48.0).max(680.0),
+                (screen_rect.width() - 100.0).clamp(1080.0, 1460.0),
+                (screen_rect.height() - 220.0).clamp(560.0, 700.0),
             );
             let current_block_number = displayed_current_block_number(&self.latest_snapshot);
             let current_era = reward_era_for_block(current_block_number);
             let mut modal_rect = None;
             if let Some(window) = egui::Window::new("Mining Curve")
                 .collapsible(false)
-                .resizable(true)
-                .default_size(modal_size)
-                .min_width(modal_size.x)
-                .min_height(modal_size.y)
+                .resizable(false)
+                .fixed_size(modal_size)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.label(
@@ -1830,44 +1859,42 @@ impl App for BlockMineStudioApp {
                             });
                         });
                     ui.add_space(10.0);
-                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                        egui::Frame::group(ui.style())
-                            .fill(theme_card_alt())
-                            .stroke(egui::Stroke::new(1.0, theme_border()))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new("Mining Curve").strong().color(theme_accent()));
-                                ui.add_space(10.0);
-                                egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                                    egui::Grid::new("era_schedule_grid")
-                                        .striped(false)
-                                        .min_col_width(78.0)
-                                        .spacing(egui::vec2(16.0, 10.0))
-                                        .show(ui, |ui| {
-                                            render_schedule_header(ui, "Era");
-                                            render_schedule_header(ui, "Name");
-                                            render_schedule_header(ui, "Block range");
-                                            render_schedule_header(ui, "Reward per block (BLOC)");
-                                            render_schedule_header(ui, "Era emissions (BLOC)");
-                                            render_schedule_header(ui, "Cumulative emissions (BLOC)");
-                                            render_schedule_header(ui, "BLOC mined");
-                                            ui.end_row();
+                    egui::Frame::group(ui.style())
+                        .fill(theme_card_alt())
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Mining Curve").strong().color(theme_accent()));
+                            ui.add_space(10.0);
+                            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+                                egui::Grid::new("era_schedule_grid")
+                                    .striped(false)
+                                    .min_col_width(78.0)
+                                    .spacing(egui::vec2(16.0, 10.0))
+                                    .show(ui, |ui| {
+                                        render_schedule_header(ui, "Era");
+                                        render_schedule_header(ui, "Name");
+                                        render_schedule_header(ui, "Block range");
+                                        render_schedule_header(ui, "Reward per block (BLOC)");
+                                        render_schedule_header(ui, "Era emissions (BLOC)");
+                                        render_schedule_header(ui, "Cumulative emissions (BLOC)");
+                                        render_schedule_header(ui, "BLOC mined");
+                                        ui.end_row();
 
-                                            for row in ERA_SCHEDULE_ROWS {
-                                                let is_current = row.era == current_era.index;
-                                                let mined_progress = format_era_progress(row, current_block_number);
-                                                render_schedule_cell(ui, row.era.to_string(), true, is_current);
-                                                render_schedule_cell(ui, row.name, false, is_current);
-                                                render_schedule_cell(ui, row.block_range, false, is_current);
-                                                render_schedule_cell(ui, row.reward_per_block, true, is_current);
-                                                render_schedule_cell(ui, row.era_emissions, true, is_current);
-                                                render_schedule_cell(ui, row.cumulative_emissions, true, is_current);
-                                                render_schedule_cell(ui, mined_progress, false, is_current);
-                                                ui.end_row();
-                                            }
-                                        });
-                                });
+                                        for row in ERA_SCHEDULE_ROWS {
+                                            let is_current = row.era == current_era.index;
+                                            let mined_progress = format_era_progress(row, current_block_number);
+                                            render_schedule_cell(ui, row.era.to_string(), true, is_current);
+                                            render_schedule_cell(ui, row.name, false, is_current);
+                                            render_schedule_cell(ui, row.block_range, false, is_current);
+                                            render_schedule_cell(ui, row.reward_per_block, true, is_current);
+                                            render_schedule_cell(ui, row.era_emissions, true, is_current);
+                                            render_schedule_cell(ui, row.cumulative_emissions, true, is_current);
+                                            render_schedule_cell(ui, mined_progress, false, is_current);
+                                            ui.end_row();
+                                        }
+                                    });
                             });
-                    });
+                        });
                 })
             {
                 modal_rect = Some(window.response.rect);
@@ -2501,13 +2528,13 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
         .rounding(rounding)
         .inner_margin(egui::Margin::same(16.0))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 ui.heading(RichText::new("Wallet").color(theme_text()));
-                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                     if ui
                         .add(
                             egui::Button::new(RichText::new("Recovery").size(12.0))
-                                .min_size(egui::vec2(92.0, 28.0)),
+                                .min_size(egui::vec2(92.0, 26.0)),
                         )
                         .clicked()
                     {
