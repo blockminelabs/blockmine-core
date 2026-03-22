@@ -32,6 +32,15 @@ const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
 const BLOCK_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
+#[cfg(target_os = "windows")]
+const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
+#[cfg(target_os = "macos")]
+const LEADERBOARD_PLATFORM_LABEL: &str = "macos";
+#[cfg(target_os = "linux")]
+const LEADERBOARD_PLATFORM_LABEL: &str = "linux";
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos"), not(target_os = "linux")))]
+const LEADERBOARD_PLATFORM_LABEL: &str = "unknown";
+
 #[derive(Debug, Clone)]
 pub struct MiningRuntimeOptions {
     pub backend: BackendMode,
@@ -121,6 +130,7 @@ struct LeaderboardHeartbeatPayload {
     miner: String,
     reporter: String,
     backend: String,
+    platform: String,
     #[serde(rename = "hashrateHps")]
     hashrate_hps: u64,
     #[serde(rename = "sessionTokensMined")]
@@ -709,6 +719,7 @@ fn build_leaderboard_heartbeat_payload(
         miner: miner_pubkey.to_string(),
         reporter: reporter_pubkey.to_string(),
         backend: backend_label(snapshot.backend).to_string(),
+        platform: LEADERBOARD_PLATFORM_LABEL.to_string(),
         hashrate_hps: snapshot.last_hashrate_hps.max(0.0).round() as u64,
         session_tokens_mined: snapshot.session_tokens_mined.to_string(),
         session_blocks_mined: snapshot.session_blocks_mined,
@@ -722,10 +733,11 @@ fn build_leaderboard_heartbeat_payload(
 
 fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
     [
-        "v1".to_string(),
+        "v2".to_string(),
         payload.miner.clone(),
         payload.reporter.clone(),
         payload.backend.clone(),
+        payload.platform.clone(),
         payload.hashrate_hps.to_string(),
         payload.session_tokens_mined.clone(),
         payload.session_blocks_mined.to_string(),
