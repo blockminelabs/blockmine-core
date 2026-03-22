@@ -4,9 +4,12 @@ set -euo pipefail
 
 source "$HOME/.cargo/env"
 export PATH="$HOME/.local/share/solana/install/active_release/bin:$HOME/.local/anchor-0.30.1/bin:$PATH"
-export LIBRARY_PATH="/mnt/c/Users/drums/Desktop/BLOC/miner-client/native/windows-opencl:${LIBRARY_PATH:-}"
-export RUSTFLAGS="-L native=/mnt/c/Users/drums/Desktop/BLOC/miner-client/native/windows-opencl ${RUSTFLAGS:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MINER_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OPENCL_LIB_DIR="$MINER_ROOT/native/windows-opencl"
+export LIBRARY_PATH="$OPENCL_LIB_DIR:${LIBRARY_PATH:-}"
+export RUSTFLAGS="-L native=$OPENCL_LIB_DIR ${RUSTFLAGS:-}"
 
-cd /mnt/c/Users/drums/Desktop/BLOC/miner-client
+cd "$MINER_ROOT"
 
 cargo build --release --target x86_64-pc-windows-gnu "$@"

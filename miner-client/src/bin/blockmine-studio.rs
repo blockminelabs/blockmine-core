@@ -51,6 +51,13 @@ const BACKGROUND_PARTICLE_DENSITY: f32 = 0.0000455;
 const BACKGROUND_MIN_PARTICLES: usize = 44;
 const BACKGROUND_MAX_PARTICLES: usize = 117;
 
+#[cfg(target_os = "windows")]
+const DESKTOP_PLATFORM_LABEL: &str = "Windows Miner";
+#[cfg(target_os = "macos")]
+const DESKTOP_PLATFORM_LABEL: &str = "MacOS Miner";
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+const DESKTOP_PLATFORM_LABEL: &str = "Desktop Miner";
+
 #[derive(Clone, Copy)]
 struct EraScheduleRow {
     era: u8,
@@ -1149,7 +1156,7 @@ impl App for BlockMineStudioApp {
                     egui::Layout::bottom_up(Align::Min),
                     |ui| {
                         ui.label(
-                            RichText::new("Windows miner GUI")
+                            RichText::new(DESKTOP_PLATFORM_LABEL)
                                 .size(13.0)
                                 .color(theme_accent()),
                         );
