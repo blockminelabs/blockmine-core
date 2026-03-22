@@ -37,7 +37,7 @@ use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 
 const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
 const DEFAULT_PROGRAM_ID: &str = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw";
-const DEFAULT_BROWSER_MINE_URL: &str = "http://127.0.0.1:3000/desktop-bridge";
+const DEFAULT_BROWSER_MINE_URL: &str = "https://blockmine.dev/desktop-bridge";
 const DEFAULT_PHANTOM_SESSION_MAX_BLOCKS: u64 = 60;
 const MAX_PHANTOM_SESSION_BLOCKS: u64 = 1000;
 const TREASURY_FEE_PER_BLOCK_LAMPORTS: u64 = 10_000_000;
@@ -926,6 +926,7 @@ impl BlockMineStudioApp {
             gpu_local_work_size: parse_optional_usize_field(&self.gpu_local_work_size, "GPU local work size")?,
             start_nonce: None,
             miner_override,
+            leaderboard_ingest_url: derive_leaderboard_ingest_url(&self.browser_mine_url),
         })
     }
 
@@ -3260,4 +3261,26 @@ fn url_decode_component(input: &str) -> String {
     }
 
     String::from_utf8_lossy(&output).to_string()
+}
+
+fn derive_site_origin(raw_url: &str) -> Option<String> {
+    let trimmed = raw_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let scheme_index = trimmed.find("://")?;
+    let authority_start = scheme_index + 3;
+    let path_start = trimmed[authority_start..]
+        .find('/')
+        .map(|offset| authority_start + offset);
+
+    Some(match path_start {
+        Some(index) => trimmed[..index].to_string(),
+        None => trimmed.to_string(),
+    })
+}
+
+fn derive_leaderboard_ingest_url(raw_url: &str) -> Option<String> {
+    derive_site_origin(raw_url).map(|origin| format!("{origin}/api/leaderboard/heartbeat"))
 }

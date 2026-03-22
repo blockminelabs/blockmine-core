@@ -9,6 +9,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use blockmine_program::constants::BLOCK_STATUS_OPEN;
+use reqwest::blocking::Client;
+use serde::Serialize;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
@@ -28,6 +30,7 @@ const RPC_RETRY_ATTEMPTS: usize = 6;
 const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
 const BLOCK_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
+const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct MiningRuntimeOptions {
@@ -42,6 +45,7 @@ pub struct MiningRuntimeOptions {
     pub gpu_local_work_size: Option<usize>,
     pub start_nonce: Option<u64>,
     pub miner_override: Option<Pubkey>,
+    pub leaderboard_ingest_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,6 +114,108 @@ pub enum MiningUpdate {
         snapshot: MiningSnapshot,
         error: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LeaderboardHeartbeatPayload {
+    miner: String,
+    reporter: String,
+    backend: String,
+    #[serde(rename = "hashrateHps")]
+    hashrate_hps: u64,
+    #[serde(rename = "sessionTokensMined")]
+    session_tokens_mined: String,
+    #[serde(rename = "sessionBlocksMined")]
+    session_blocks_mined: u64,
+    #[serde(rename = "walletTokensMined")]
+    wallet_tokens_mined: String,
+    #[serde(rename = "walletBlocksMined")]
+    wallet_blocks_mined: u64,
+    #[serde(rename = "currentBlockNumber")]
+    current_block_number: u64,
+    #[serde(rename = "updatedAt")]
+    updated_at: u64,
+    #[serde(rename = "signatureHex")]
+    signature_hex: String,
+}
+
+struct LeaderboardReporter {
+    client: Option<Client>,
+    ingest_url: Option<String>,
+    last_sent_at: Option<Instant>,
+    miner_pubkey: Pubkey,
+    reporter_pubkey: Pubkey,
+}
+
+impl LeaderboardReporter {
+    fn new(
+        ingest_url: Option<String>,
+        miner_pubkey: Pubkey,
+        reporter_pubkey: Pubkey,
+    ) -> Result<Self> {
+        let trimmed_url = ingest_url.and_then(|value| {
+            let trimmed = value.trim().to_string();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            }
+        });
+        let client = if trimmed_url.is_some() {
+            Some(
+                Client::builder()
+                    .timeout(Duration::from_secs(4))
+                    .build()
+                    .context("failed to build the leaderboard HTTP client")?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            client,
+            ingest_url: trimmed_url,
+            last_sent_at: None,
+            miner_pubkey,
+            reporter_pubkey,
+        })
+    }
+
+    fn maybe_send(&mut self, signer: &Keypair, snapshot: &MiningSnapshot, force: bool) {
+        if self.client.is_none() || self.ingest_url.is_none() {
+            return;
+        }
+
+        if !force
+            && self
+                .last_sent_at
+                .is_some_and(|last_sent_at| last_sent_at.elapsed() < LEADERBOARD_HEARTBEAT_INTERVAL)
+        {
+            return;
+        }
+
+        let payload = build_leaderboard_heartbeat_payload(
+            self.miner_pubkey,
+            self.reporter_pubkey,
+            snapshot,
+        );
+        let message = build_leaderboard_heartbeat_message(&payload);
+        let signature_hex = hex::encode(signer.sign_message(message.as_bytes()).as_ref());
+        let signed_payload = LeaderboardHeartbeatPayload {
+            signature_hex,
+            ..payload
+        };
+
+        if let (Some(client), Some(url)) = (&self.client, &self.ingest_url) {
+            let _ = client
+                .post(url)
+                .json(&signed_payload)
+                .send()
+                .and_then(|response| response.error_for_status());
+        }
+
+        self.last_sent_at = Some(Instant::now());
+    }
 }
 
 pub struct MiningHandle {
@@ -203,7 +309,13 @@ fn worker_loop(
         miner_stats,
         protocol,
     );
+    let mut leaderboard_reporter = LeaderboardReporter::new(
+        options.leaderboard_ingest_url.clone(),
+        miner_pubkey,
+        signer.pubkey(),
+    )?;
     state.emit(sender, latest_snapshot);
+    leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
 
     while !stop_requested.load(Ordering::Relaxed) {
         let should_refresh_block =
@@ -220,6 +332,7 @@ fn worker_loop(
                         format!("Retrying after RPC error: {}", first_line(&error.to_string()));
                     state.snapshot.last_error = Some(error.to_string());
                     state.emit(sender, latest_snapshot);
+                    leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
                     thread::sleep(Duration::from_secs(2));
                     continue;
                 }
@@ -259,6 +372,7 @@ fn worker_loop(
             }
 
             state.emit(sender, latest_snapshot);
+            leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
             thread::sleep(Duration::from_millis(300));
             continue;
         }
@@ -267,6 +381,7 @@ fn worker_loop(
         state.snapshot.last_event = "Searching for a valid nonce".to_string();
         state.snapshot.last_error = None;
         state.emit(sender, latest_snapshot);
+        leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
 
         let input = crate::engine::SearchInput {
             challenge: current_block.challenge,
@@ -344,6 +459,7 @@ fn worker_loop(
                 );
                 state.snapshot.last_error = None;
                 state.emit(sender, latest_snapshot);
+                leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
                 next_nonce = outcome.next_nonce;
                 continue;
             }
@@ -382,6 +498,7 @@ fn worker_loop(
                 }
 
                 state.emit(sender, latest_snapshot);
+                leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
                 next_nonce = outcome.next_nonce;
                 continue;
             }
@@ -440,11 +557,13 @@ fn worker_loop(
 
         next_nonce = outcome.next_nonce;
         state.emit(sender, latest_snapshot);
+        leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
     }
 
     state.snapshot.status = "Stopped".to_string();
     state.snapshot.last_event = "Mining stopped by user".to_string();
     state.snapshot.last_error = None;
+    leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
     latest_snapshot.clone_from(&state.snapshot);
     let _ = sender.send(MiningUpdate::Stopped {
         snapshot: state.snapshot,
@@ -579,6 +698,51 @@ fn format_hashrate_hps(rate_hps: f64) -> String {
     }
 
     format!("{:.0} H/s", rate_hps)
+}
+
+fn build_leaderboard_heartbeat_payload(
+    miner_pubkey: Pubkey,
+    reporter_pubkey: Pubkey,
+    snapshot: &MiningSnapshot,
+) -> LeaderboardHeartbeatPayload {
+    LeaderboardHeartbeatPayload {
+        miner: miner_pubkey.to_string(),
+        reporter: reporter_pubkey.to_string(),
+        backend: backend_label(snapshot.backend).to_string(),
+        hashrate_hps: snapshot.last_hashrate_hps.max(0.0).round() as u64,
+        session_tokens_mined: snapshot.session_tokens_mined.to_string(),
+        session_blocks_mined: snapshot.session_blocks_mined,
+        wallet_tokens_mined: snapshot.wallet_tokens_mined.to_string(),
+        wallet_blocks_mined: snapshot.wallet_blocks_mined,
+        current_block_number: snapshot.current_block_number,
+        updated_at: unix_timestamp_now().max(0) as u64,
+        signature_hex: String::new(),
+    }
+}
+
+fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
+    [
+        "v1".to_string(),
+        payload.miner.clone(),
+        payload.reporter.clone(),
+        payload.backend.clone(),
+        payload.hashrate_hps.to_string(),
+        payload.session_tokens_mined.clone(),
+        payload.session_blocks_mined.to_string(),
+        payload.wallet_tokens_mined.clone(),
+        payload.wallet_blocks_mined.to_string(),
+        payload.current_block_number.to_string(),
+        payload.updated_at.to_string(),
+    ]
+    .join("|")
+}
+
+fn backend_label(mode: BackendMode) -> &'static str {
+    match mode {
+        BackendMode::Cpu => "cpu",
+        BackendMode::Gpu => "gpu",
+        BackendMode::Both => "both",
+    }
 }
 
 struct WorkerState {
