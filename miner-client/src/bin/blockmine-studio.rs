@@ -2571,16 +2571,16 @@ fn format_count_compact(value: u64) -> String {
     let value_f64 = value as f64;
 
     if value >= 1_000_000_000_000 {
-        return format!("{:.2} tn", value_f64 / 1_000_000_000_000.0);
+        return format!("{:.2}T", value_f64 / 1_000_000_000_000.0);
     }
     if value >= 1_000_000_000 {
-        return format!("{:.2} mld", value_f64 / 1_000_000_000.0);
+        return format!("{:.2}B", value_f64 / 1_000_000_000.0);
     }
     if value >= 1_000_000 {
-        return format!("{:.2} mln", value_f64 / 1_000_000.0);
+        return format!("{:.2}M", value_f64 / 1_000_000.0);
     }
     if value >= 1_000 {
-        return format!("{:.2}k", value_f64 / 1_000.0);
+        return format!("{:.2}K", value_f64 / 1_000.0);
     }
 
     value.to_string()
