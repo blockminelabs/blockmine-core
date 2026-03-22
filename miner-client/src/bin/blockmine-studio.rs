@@ -448,8 +448,8 @@ impl MouseParticleFieldState {
 fn main() -> eframe::Result<()> {
     let mut native_options = NativeOptions::default();
     native_options.viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1320.0, 860.0])
-        .with_min_inner_size([980.0, 700.0])
+        .with_inner_size([1500.0, 980.0])
+        .with_min_inner_size([1180.0, 820.0])
         .with_title("BlockMine Studio")
         .with_icon(load_app_icon());
 
@@ -1376,15 +1376,15 @@ impl App for BlockMineStudioApp {
                     ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
 
                     ui.columns(2, |columns| {
-                        columns[0].vertical(|ui| {
-                            render_wallet_card(ui, self);
-                            render_miner_controls_card(ui, self);
-                        });
+                        render_wallet_card(&mut columns[0], self);
+                        render_hashrate_signal_card(&mut columns[1], self);
+                    });
 
-                        columns[1].vertical(|ui| {
-                            render_hashrate_signal_card(ui, self);
-                            render_live_telemetry_card(ui, self);
-                        });
+                    ui.add_space(14.0);
+
+                    ui.columns(2, |columns| {
+                        render_miner_controls_card(&mut columns[0], self);
+                        render_live_telemetry_card(&mut columns[1], self);
                     });
                 });
         });
@@ -1423,18 +1423,12 @@ impl App for BlockMineStudioApp {
                                 }
                                 if action_choice_card(
                                     &mut columns[1],
-                                    "Manual funding",
+                                    "Manual Deposit",
                                     "Copy the desktop wallet address and send SOL from any external wallet.",
                                     false,
                                 ) {
                                     self.deposit_method = DepositMethod::ManualSend;
                                     self.deposit_modal_step = DepositModalStep::Details;
-                                }
-                            });
-                            ui.add_space(14.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Close").clicked() {
-                                    self.show_deposit_modal = false;
                                 }
                             });
                         }
@@ -1498,20 +1492,18 @@ impl App for BlockMineStudioApp {
                                         self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
                                         self.error = None;
                                     }
-                                });
+                            });
                             ui.add_space(10.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("Close").clicked() {
-                                    self.show_deposit_modal = false;
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(RichText::new("Back").size(11.0))
+                                            .min_size(egui::vec2(68.0, 26.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.deposit_modal_step = DepositModalStep::Picker;
                                 }
-                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                    if ui
-                                        .add(egui::Button::new(RichText::new("Back").size(11.0)).min_size(egui::vec2(68.0, 26.0)))
-                                        .clicked()
-                                    {
-                                        self.deposit_modal_step = DepositModalStep::Picker;
-                                    }
-                                });
                             });
                         }
                     }
@@ -1793,7 +1785,10 @@ impl App for BlockMineStudioApp {
 
         if self.show_era_schedule_modal {
             let mut open = true;
-            let modal_size = egui::vec2(screen_rect.width() * 0.9, screen_rect.height() * 0.84);
+            let modal_size = egui::vec2(
+                (screen_rect.width() - 36.0).max(920.0),
+                (screen_rect.height() - 48.0).max(680.0),
+            );
             let current_block_number = displayed_current_block_number(&self.latest_snapshot);
             let current_era = reward_era_for_block(current_block_number);
             let mut modal_rect = None;
@@ -1801,8 +1796,8 @@ impl App for BlockMineStudioApp {
                 .collapsible(false)
                 .resizable(true)
                 .default_size(modal_size)
-                .min_width(860.0)
-                .min_height(620.0)
+                .min_width(modal_size.x)
+                .min_height(modal_size.y)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.label(
@@ -2477,46 +2472,56 @@ fn decode_era_name(name: [u8; ERA_NAME_LEN]) -> String {
 }
 
 fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
-    card_frame(ui, "Wallet", |ui| {
-        let total_session_balance_lamports = app
-            .session_balance_summary
-            .as_ref()
-            .map(|summary| summary.total_balance_lamports)
-            .unwrap_or(0);
-        let total_bloc_balance_raw = app
-            .session_balance_summary
-            .as_ref()
-            .map(|summary| summary.total_bloc_balance_raw)
-            .unwrap_or(0);
-        let bloc_decimals = app
-            .session_balance_summary
-            .as_ref()
-            .map(|summary| summary.bloc_decimals)
-            .unwrap_or(9);
-        let desktop_wallet_address = app
-            .active_wallet
-            .as_ref()
-            .map(|wallet| wallet.pubkey.clone())
-            .unwrap_or_else(|| "Not ready yet".to_string());
-        let session_blocks_mineable =
-            total_session_balance_lamports / TREASURY_FEE_PER_BLOCK_LAMPORTS;
+    let total_session_balance_lamports = app
+        .session_balance_summary
+        .as_ref()
+        .map(|summary| summary.total_balance_lamports)
+        .unwrap_or(0);
+    let total_bloc_balance_raw = app
+        .session_balance_summary
+        .as_ref()
+        .map(|summary| summary.total_bloc_balance_raw)
+        .unwrap_or(0);
+    let bloc_decimals = app
+        .session_balance_summary
+        .as_ref()
+        .map(|summary| summary.bloc_decimals)
+        .unwrap_or(9);
+    let desktop_wallet_address = app
+        .active_wallet
+        .as_ref()
+        .map(|wallet| wallet.pubkey.clone())
+        .unwrap_or_else(|| "Not ready yet".to_string());
+    let session_blocks_mineable = total_session_balance_lamports / TREASURY_FEE_PER_BLOCK_LAMPORTS;
 
-        ui.horizontal(|ui| {
+    let rounding = egui::Rounding::same(18.0);
+    let response = egui::Frame::group(ui.style())
+        .fill(theme_card())
+        .stroke(egui::Stroke::new(1.0, theme_border()))
+        .rounding(rounding)
+        .inner_margin(egui::Margin::same(16.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("Wallet").color(theme_text()));
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Recovery").size(12.0))
+                                .min_size(egui::vec2(92.0, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        app.show_seed_phrase_warning_modal = true;
+                    }
+                });
+            });
+            ui.add_space(10.0);
             ui.label(
                 RichText::new(
                     "The desktop miner uses one local wallet on this machine. Keep a little SOL inside and it can keep mined blocks flowing without interruption.",
                 )
                 .color(theme_muted()),
             );
-            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add(egui::Button::new(RichText::new("Recovery").size(12.0)).min_size(egui::vec2(92.0, 28.0)))
-                    .clicked()
-                {
-                    app.show_seed_phrase_warning_modal = true;
-                }
-            });
-        });
         ui.add_space(8.0);
         if app.seed_phrase_requires_ack && !app.seed_phrase_acknowledged {
             egui::Frame::group(ui.style())
@@ -2606,6 +2611,7 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             }
         });
     });
+    paint_frame_glow(ui, response.response.rect, rounding);
 }
 
 fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
@@ -3331,8 +3337,13 @@ fn action_choice_card(ui: &mut egui::Ui, title: &str, caption: &str, primary: bo
             ui.add_space(10.0);
             ui.label(RichText::new(caption).color(theme_muted()).size(15.0));
         });
+    let click_response = ui.interact(
+        response.response.rect,
+        ui.id().with(("action_choice_card", title)),
+        egui::Sense::click(),
+    );
     paint_frame_glow(ui, response.response.rect, rounding);
-    response.response.clicked()
+    click_response.clicked()
 }
 
 fn render_fast_mode_choice(ui: &mut egui::Ui, label: &str, hardware: &str, selected: bool) -> bool {
@@ -3363,8 +3374,13 @@ fn render_fast_mode_choice(ui: &mut egui::Ui, label: &str, hardware: &str, selec
             ui.add_space(8.0);
             ui.label(RichText::new(hardware).color(theme_text()).size(20.0));
         });
+    let click_response = ui.interact(
+        response.response.rect,
+        ui.id().with(("fast_mode_choice", label)),
+        egui::Sense::click(),
+    );
     paint_frame_glow(ui, response.response.rect, rounding);
-    response.response.clicked()
+    click_response.clicked()
 }
 
 fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
