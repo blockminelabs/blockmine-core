@@ -24,6 +24,7 @@ pub struct ManagedWallet {
 }
 
 const DESKTOP_SESSION_WALLET_FILENAME: &str = "desktop-session-wallet.json";
+const DESKTOP_SESSION_WALLET_SEED_FILENAME: &str = "desktop-session-wallet.seed.txt";
 
 pub fn app_storage_dir() -> Result<PathBuf> {
     if let Some(data_dir) = dirs::data_local_dir() {
@@ -88,24 +89,36 @@ pub fn create_session_delegate_wallet(label: Option<&str>) -> Result<ManagedWall
     fs::create_dir_all(&wallet_dir)
         .with_context(|| format!("failed to create wallet directory {}", wallet_dir.display()))?;
     let keypair_path = wallet_dir.join(DESKTOP_SESSION_WALLET_FILENAME);
+    let seed_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_SEED_FILENAME);
 
     if let Some(existing) = load_session_delegate_wallet()? {
         return Ok(existing);
     }
 
-    let keypair = Keypair::new();
+    let mnemonic = Mnemonic::generate_in(Language::English, 12)
+        .context("failed to generate a recovery phrase for the desktop mining wallet")?;
+    let phrase = mnemonic.to_string();
+    let keypair = keypair_from_seed_phrase_and_passphrase(&phrase, "").map_err(|error| {
+        anyhow::anyhow!("failed to derive a Solana keypair from the recovery phrase: {error}")
+    })?;
 
     let pubkey = keypair.pubkey().to_string();
     let _ = label;
 
     write_keypair_file(&keypair, &keypair_path)
         .map_err(|error| anyhow::anyhow!("failed to write {}: {error}", keypair_path.display()))?;
+    fs::write(&seed_phrase_path, format!("{phrase}\n")).with_context(|| {
+        format!(
+            "failed to write the recovery phrase to {}",
+            seed_phrase_path.display()
+        )
+    })?;
 
     Ok(ManagedWallet {
         pubkey,
         keypair_path,
-        seed_phrase_path: None,
-        seed_phrase: None,
+        seed_phrase_path: Some(seed_phrase_path),
+        seed_phrase: Some(phrase),
         source: WalletSource::SessionDelegate,
     })
 }
@@ -113,6 +126,7 @@ pub fn create_session_delegate_wallet(label: Option<&str>) -> Result<ManagedWall
 pub fn load_session_delegate_wallet() -> Result<Option<ManagedWallet>> {
     let wallet_dir = app_storage_dir()?.join("wallets");
     let keypair_path = wallet_dir.join(DESKTOP_SESSION_WALLET_FILENAME);
+    let seed_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_SEED_FILENAME);
     if !keypair_path.exists() {
         return Ok(None);
     }
@@ -123,15 +137,38 @@ pub fn load_session_delegate_wallet() -> Result<Option<ManagedWallet>> {
     Ok(Some(ManagedWallet {
         pubkey: keypair.pubkey().to_string(),
         keypair_path,
-        seed_phrase_path: None,
+        seed_phrase_path: seed_phrase_path.exists().then_some(seed_phrase_path),
         seed_phrase: None,
         source: WalletSource::SessionDelegate,
     }))
 }
 
 pub fn load_managed_keypair(wallet: &ManagedWallet) -> Result<Keypair> {
-    read_keypair_file(&wallet.keypair_path)
-        .map_err(|error| anyhow::anyhow!("failed to read {}: {error}", wallet.keypair_path.display()))
+    read_keypair_file(&wallet.keypair_path).map_err(|error| {
+        anyhow::anyhow!("failed to read {}: {error}", wallet.keypair_path.display())
+    })
+}
+
+pub fn load_wallet_seed_phrase(wallet: &ManagedWallet) -> Result<Option<String>> {
+    if let Some(phrase) = &wallet.seed_phrase {
+        return Ok(Some(phrase.trim().to_string()));
+    }
+
+    let Some(path) = &wallet.seed_phrase_path else {
+        return Ok(None);
+    };
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let phrase =
+        fs::read_to_string(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let trimmed = phrase.trim().to_string();
+    if trimmed.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(trimmed))
+    }
 }
 
 fn sanitize_label(input: &str) -> String {

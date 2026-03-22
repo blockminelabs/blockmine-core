@@ -11,38 +11,38 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
 use blockmine_miner::config::CliConfig;
 use blockmine_miner::engine::gpu::{list_devices as list_gpu_devices, GpuDeviceInfo, GpuMiner};
 use blockmine_miner::engine::BackendMode;
 use blockmine_miner::miner_loop::GpuDeviceSelection;
-use blockmine_miner::mining_service::{MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate};
+use blockmine_miner::mining_service::{
+    MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate,
+};
 use blockmine_miner::session_wallet::{
     load_session_delegate_balances, sweep_single_session_delegate_wallet, SessionBalanceSummary,
     SessionSweepSummary,
 };
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::wallet_store::{
-    app_storage_dir, create_session_delegate_wallet, load_managed_keypair, load_session_delegate_wallet,
-    ManagedWallet, WalletSource,
+    app_storage_dir, create_session_delegate_wallet, load_managed_keypair,
+    load_session_delegate_wallet, load_wallet_seed_phrase, ManagedWallet, WalletSource,
 };
-use eframe::egui::{self, Align, Color32, IconData, RichText, TextEdit, TextureHandle, TextureOptions};
+use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
+use eframe::egui::{
+    self, Align, Color32, IconData, RichText, TextEdit, TextureHandle, TextureOptions,
+};
 use eframe::{App, Frame, NativeOptions};
-use image::{AnimationDecoder, ImageReader};
 use image::codecs::gif::GifDecoder;
+use image::{AnimationDecoder, ImageReader};
 use rand::Rng;
-use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
+use sysinfo::System;
 
 const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
 const DEFAULT_PROGRAM_ID: &str = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw";
 const DEFAULT_BROWSER_MINE_URL: &str = "https://blockmine.dev/desktop-bridge";
-const DEFAULT_PHANTOM_SESSION_MAX_BLOCKS: u64 = 60;
-const MAX_PHANTOM_SESSION_BLOCKS: u64 = 1000;
 const TREASURY_FEE_PER_BLOCK_LAMPORTS: u64 = 10_000_000;
-const SESSION_NETWORK_BUFFER_BASE_LAMPORTS: u64 = 500_000;
-const SESSION_NETWORK_BUFFER_PER_BLOCK_LAMPORTS: u64 = 25_000;
 const CHART_POINT_COUNT: usize = 34;
 const CHART_WINDOW: Duration = Duration::from_secs(30);
 const BACKGROUND_LINK_DISTANCE: f32 = 112.0;
@@ -259,6 +259,12 @@ enum DepositMethod {
     ManualSend,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FastMiningChoice {
+    Cpu,
+    Gpu,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DesktopUiPreferences {
     batch_size: String,
@@ -387,10 +393,10 @@ impl MouseParticleFieldState {
         self.last_bounds = size;
         let mut rng = rand::thread_rng();
         let area = (size.x.max(1.0) * size.y.max(1.0)) * BACKGROUND_PARTICLE_DENSITY;
-        let count = area
-            .round()
-            .clamp(BACKGROUND_MIN_PARTICLES as f32, BACKGROUND_MAX_PARTICLES as f32)
-            as usize;
+        let count = area.round().clamp(
+            BACKGROUND_MIN_PARTICLES as f32,
+            BACKGROUND_MAX_PARTICLES as f32,
+        ) as usize;
 
         self.particles = (0..count)
             .map(|_| BackgroundParticle {
@@ -464,7 +470,7 @@ struct BlockMineStudioApp {
     rpc_url: String,
     program_id: String,
     browser_mine_url: String,
-    phantom_session_max_blocks: u64,
+    web3_deposit_sol: f32,
     backend: BackendMode,
     batch_size: String,
     gpu_batch_size: String,
@@ -493,11 +499,18 @@ struct BlockMineStudioApp {
     show_deposit_modal: bool,
     show_withdrawal_modal: bool,
     show_era_schedule_modal: bool,
+    show_seed_phrase_modal: bool,
+    show_seed_phrase_warning_modal: bool,
     deposit_method: DepositMethod,
+    seed_phrase_words: Vec<String>,
+    seed_phrase_requires_ack: bool,
+    seed_phrase_acknowledged: bool,
     withdrawal_target_wallet: String,
     withdrawal_sol_amount: String,
     withdrawal_bloc_amount: String,
     miner_controls_mode: MinerControlsMode,
+    fast_mining_choice: FastMiningChoice,
+    cpu_model_label: String,
     logo_circle_texture: Option<TextureHandle>,
     logo_wordmark_texture: Option<TextureHandle>,
     money_animation: Option<AnimatedTexture>,
@@ -518,7 +531,18 @@ struct BlockMineStudioApp {
 impl BlockMineStudioApp {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         apply_brand_visuals(&cc.egui_ctx);
-        let desktop_wallet = create_session_delegate_wallet(Some("desktop-session")).ok();
+        let existing_wallet = load_session_delegate_wallet().ok().flatten();
+        let desktop_wallet = existing_wallet
+            .clone()
+            .or_else(|| create_session_delegate_wallet(Some("desktop-session")).ok());
+        let initial_seed_phrase = if existing_wallet.is_none() {
+            desktop_wallet
+                .as_ref()
+                .and_then(|wallet| wallet.seed_phrase.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
         let preferences = load_desktop_ui_preferences().ok().flatten();
         let selected_gpu_keys = preferences
             .as_ref()
@@ -529,7 +553,7 @@ impl BlockMineStudioApp {
             rpc_url: DEFAULT_RPC_URL.to_string(),
             program_id: DEFAULT_PROGRAM_ID.to_string(),
             browser_mine_url: DEFAULT_BROWSER_MINE_URL.to_string(),
-            phantom_session_max_blocks: DEFAULT_PHANTOM_SESSION_MAX_BLOCKS,
+            web3_deposit_sol: 0.6,
             backend: BackendMode::Cpu,
             batch_size: preferences
                 .as_ref()
@@ -570,11 +594,18 @@ impl BlockMineStudioApp {
             show_deposit_modal: false,
             show_withdrawal_modal: false,
             show_era_schedule_modal: false,
+            show_seed_phrase_modal: !initial_seed_phrase.is_empty(),
+            show_seed_phrase_warning_modal: false,
             deposit_method: DepositMethod::Web3Wallet,
+            seed_phrase_words: split_seed_phrase_words(&initial_seed_phrase),
+            seed_phrase_requires_ack: !initial_seed_phrase.is_empty(),
+            seed_phrase_acknowledged: false,
             withdrawal_target_wallet: String::new(),
             withdrawal_sol_amount: String::new(),
             withdrawal_bloc_amount: String::new(),
             miner_controls_mode: MinerControlsMode::Fast,
+            fast_mining_choice: FastMiningChoice::Cpu,
+            cpu_model_label: detect_cpu_model(),
             logo_circle_texture: load_embedded_texture(
                 &cc.egui_ctx,
                 "brand-circle",
@@ -608,7 +639,12 @@ impl BlockMineStudioApp {
             hashrate_chart: HashrateChartState::new(),
             mouse_particle_field: MouseParticleFieldState::new(),
             mining_started_at: None,
-            status: "Desktop mining wallet ready. Deposit SOL to cover treasury fees, then start mining.".to_string(),
+            status: if initial_seed_phrase.is_empty() {
+                "Desktop mining wallet ready. Deposit SOL, then start mining.".to_string()
+            } else {
+                "Desktop mining wallet created. Back up the seed phrase before you mine."
+                    .to_string()
+            },
             error: None,
         };
         app.refresh_gpu_devices();
@@ -617,17 +653,65 @@ impl BlockMineStudioApp {
     }
 
     fn open_deposit_modal(&mut self) {
-        if self.active_wallet.is_none() {
-            match create_session_delegate_wallet(Some("desktop-session")) {
-                Ok(wallet) => self.active_wallet = Some(wallet),
-                Err(error) => {
-                    self.error = Some(format!("Failed to prepare the desktop mining wallet: {error}"));
-                    return;
-                }
-            }
+        if !self.ensure_active_wallet() {
+            return;
         }
         self.show_deposit_modal = true;
         self.error = None;
+    }
+
+    fn ensure_active_wallet(&mut self) -> bool {
+        if self.active_wallet.is_some() {
+            return true;
+        }
+
+        match create_session_delegate_wallet(Some("desktop-session")) {
+            Ok(wallet) => {
+                self.active_wallet = Some(wallet.clone());
+                if let Some(phrase) = wallet.seed_phrase.clone() {
+                    self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                    self.seed_phrase_requires_ack = true;
+                    self.seed_phrase_acknowledged = false;
+                    self.show_seed_phrase_modal = true;
+                    self.status =
+                        "Desktop mining wallet created. Back up the seed phrase before you mine."
+                            .to_string();
+                }
+                true
+            }
+            Err(error) => {
+                self.error = Some(format!(
+                    "Failed to prepare the desktop mining wallet: {error}"
+                ));
+                false
+            }
+        }
+    }
+
+    fn open_seed_phrase_for_wallet(&mut self, require_ack: bool) {
+        let Some(wallet) = self.active_wallet.as_ref() else {
+            self.error = Some("The desktop mining wallet is not ready yet.".to_string());
+            return;
+        };
+
+        match load_wallet_seed_phrase(wallet) {
+            Ok(Some(phrase)) => {
+                self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                self.seed_phrase_requires_ack = require_ack;
+                self.seed_phrase_acknowledged = false;
+                self.show_seed_phrase_modal = true;
+                self.error = None;
+            }
+            Ok(None) => {
+                self.error = Some(
+                    "This wallet was created before recovery phrases were enabled. Move the funds to a fresh wallet before mainnet."
+                        .to_string(),
+                );
+            }
+            Err(error) => {
+                self.error = Some(format!("Failed to load the recovery phrase: {error}"));
+            }
+        }
     }
 
     fn open_web3_deposit_flow(&mut self) {
@@ -636,20 +720,21 @@ impl BlockMineStudioApp {
             return;
         };
 
-        let deposit_lamports = desktop_session_fee_budget_lamports(self.phantom_session_max_blocks);
+        let deposit_lamports = sol_to_lamports(self.web3_deposit_sol.max(0.1));
+        let deposit_block_cap = (deposit_lamports / TREASURY_FEE_PER_BLOCK_LAMPORTS).max(1);
         let desktop_bridge_url = format!(
             "{}?desktop_deposit=1&desktop_wallet={}&desktop_deposit_lamports={}&desktop_max_submissions={}",
             self.browser_mine_url.trim_end_matches('/'),
             wallet.pubkey,
             deposit_lamports,
-            self.phantom_session_max_blocks
+            deposit_block_cap
         );
 
         match open_in_default_browser(&desktop_bridge_url) {
             Ok(()) => {
                 self.show_deposit_modal = false;
                 self.status = format!(
-                    "Web3 deposit flow opened. Approve about {} SOL in the browser wallet to fund the desktop miner.",
+                    "Web3 deposit opened. Approve about {} SOL in the browser wallet to fund the miner.",
                     format_sol_compact(deposit_lamports)
                 );
                 self.error = None;
@@ -764,12 +849,10 @@ impl BlockMineStudioApp {
             return;
         }
 
-        let valid_keys: BTreeSet<String> = self
-            .gpu_devices
-            .iter()
-            .map(device_selection_key)
-            .collect();
-        self.selected_gpu_keys.retain(|key| valid_keys.contains(key));
+        let valid_keys: BTreeSet<String> =
+            self.gpu_devices.iter().map(device_selection_key).collect();
+        self.selected_gpu_keys
+            .retain(|key| valid_keys.contains(key));
         if self.selected_gpu_keys.is_empty() {
             self.selected_gpu_keys = valid_keys;
         }
@@ -787,13 +870,20 @@ impl BlockMineStudioApp {
     fn selected_gpu_devices(&self) -> Vec<&GpuDeviceInfo> {
         self.gpu_devices
             .iter()
-            .filter(|device| self.selected_gpu_keys.contains(&device_selection_key(device)))
+            .filter(|device| {
+                self.selected_gpu_keys
+                    .contains(&device_selection_key(device))
+            })
             .collect()
     }
 
     fn start_mining(&mut self) {
         if self.mining_handle.is_some() {
             self.error = Some("Mining is already running.".to_string());
+            return;
+        }
+
+        if !self.ensure_active_wallet() {
             return;
         }
 
@@ -826,7 +916,8 @@ impl BlockMineStudioApp {
         }
 
         let Some(session) = self.phantom_session.clone() else {
-            self.error = Some("Connect a wallet first to arm a desktop mining session.".to_string());
+            self.error =
+                Some("Connect a wallet first to arm a desktop mining session.".to_string());
             return;
         };
 
@@ -856,7 +947,9 @@ impl BlockMineStudioApp {
 
         let candidates = build_gpu_autotune_candidates(&selected_devices);
         if candidates.is_empty() {
-            self.error = Some("No valid GPU tuning profiles were generated for the selected GPUs.".to_string());
+            self.error = Some(
+                "No valid GPU tuning profiles were generated for the selected GPUs.".to_string(),
+            );
             return;
         }
 
@@ -915,14 +1008,20 @@ impl BlockMineStudioApp {
         self.active_runtime_wallet = Some(wallet.clone());
         self.active_runtime_miner = miner_override;
         self.status = match miner_override {
-            Some(miner) => format!("Native miner started for connected wallet {} via session delegate.", miner),
+            Some(miner) => format!(
+                "Native miner started for connected wallet {} via session delegate.",
+                miner
+            ),
             None => format!("Native miner started for wallet {}.", wallet.pubkey),
         };
         self.error = None;
         Ok(())
     }
 
-    fn build_runtime_options(&self, miner_override: Option<Pubkey>) -> Result<MiningRuntimeOptions> {
+    fn build_runtime_options(
+        &self,
+        miner_override: Option<Pubkey>,
+    ) -> Result<MiningRuntimeOptions> {
         let selected_gpu_devices: Vec<GpuDeviceSelection> = self
             .selected_gpu_devices()
             .into_iter()
@@ -931,7 +1030,9 @@ impl BlockMineStudioApp {
                 device_index: device.device_index,
             })
             .collect();
-        if matches!(self.backend, BackendMode::Gpu | BackendMode::Both) && selected_gpu_devices.is_empty() {
+        if matches!(self.backend, BackendMode::Gpu | BackendMode::Both)
+            && selected_gpu_devices.is_empty()
+        {
             anyhow::bail!("Select at least one GPU to start GPU mining.");
         }
         let fallback_device = self.selected_gpu_devices().into_iter().next();
@@ -943,9 +1044,16 @@ impl BlockMineStudioApp {
             cpu_threads: parse_usize_field(&self.cpu_threads, "CPU threads")?,
             cpu_core_ids: selected_cpu_cores(&self.selected_cpu_cores),
             gpu_devices: selected_gpu_devices,
-            gpu_platform: fallback_device.map(|device| device.platform_index).unwrap_or(0),
-            gpu_device: fallback_device.map(|device| device.device_index).unwrap_or(0),
-            gpu_local_work_size: parse_optional_usize_field(&self.gpu_local_work_size, "GPU local work size")?,
+            gpu_platform: fallback_device
+                .map(|device| device.platform_index)
+                .unwrap_or(0),
+            gpu_device: fallback_device
+                .map(|device| device.device_index)
+                .unwrap_or(0),
+            gpu_local_work_size: parse_optional_usize_field(
+                &self.gpu_local_work_size,
+                "GPU local work size",
+            )?,
             start_nonce: None,
             miner_override,
             leaderboard_ingest_url: derive_leaderboard_ingest_url(&self.browser_mine_url),
@@ -997,7 +1105,8 @@ impl BlockMineStudioApp {
             match (result, pending) {
                 (Ok(completion), Some(pending))
                     if completion.token == pending.token
-                        && completion.delegate_pubkey.to_string() == pending.delegate_wallet.pubkey =>
+                        && completion.delegate_pubkey.to_string()
+                            == pending.delegate_wallet.pubkey =>
                 {
                     self.phantom_session = Some(PhantomSessionLink {
                         miner_pubkey: completion.miner_pubkey,
@@ -1012,7 +1121,9 @@ impl BlockMineStudioApp {
                     self.start_session_balance_refresh();
                 }
                 (Ok(_), _) => {
-                    self.error = Some("Wallet bridge response did not match the pending session.".to_string());
+                    self.error = Some(
+                        "Wallet bridge response did not match the pending session.".to_string(),
+                    );
                 }
                 (Err(error), _) => {
                     self.error = Some(error);
@@ -1084,7 +1195,8 @@ impl BlockMineStudioApp {
                                 outcome.tested.len()
                             ));
                             self.persist_ui_preferences();
-                            self.status = "GPU auto-tune completed. Best settings applied.".to_string();
+                            self.status =
+                                "GPU auto-tune completed. Best settings applied.".to_string();
                             self.error = None;
                         }
                         Err(error) => {
@@ -1094,14 +1206,6 @@ impl BlockMineStudioApp {
                     }
                 }
             }
-        }
-    }
-
-    fn wallet_source_label(wallet: &ManagedWallet) -> &'static str {
-        match wallet.source {
-            WalletSource::DedicatedGenerated => "Dedicated wallet",
-            WalletSource::SessionDelegate => "Phantom session delegate",
-            WalletSource::ImportedFile => "Imported keypair",
         }
     }
 
@@ -1133,7 +1237,8 @@ impl App for BlockMineStudioApp {
         let screen_rect = ctx.screen_rect();
         let pointer = ctx.input(|input| input.pointer.hover_pos());
         let stable_dt = ctx.input(|input| input.stable_dt).max(1.0 / 120.0);
-        self.mouse_particle_field.tick(screen_rect, pointer, stable_dt);
+        self.mouse_particle_field
+            .tick(screen_rect, pointer, stable_dt);
         if self.session_balance_receiver.is_none()
             && self.last_session_balance_refresh_at.elapsed() >= Duration::from_secs(3)
             && (self.active_wallet.is_some()
@@ -1153,39 +1258,43 @@ impl App for BlockMineStudioApp {
                     .inner_margin(egui::Margin::symmetric(18.0, 14.0)),
             )
             .show(ctx, |ui| {
-            paint_mouse_particle_field(ui, &self.mouse_particle_field, screen_rect);
-            ui.add_space(10.0);
-            ui.horizontal_wrapped(|ui| {
-                render_brand_header(ui, self.logo_circle_texture.as_ref(), self.logo_wordmark_texture.as_ref());
-                if let Some(started_at) = self.block_found_animation_started_at {
-                    if started_at.elapsed() <= Duration::from_secs(5) {
-                        if let Some(animation) = &self.money_animation {
-                            ui.add_space(6.0);
-                            render_animated_texture(ui, animation, started_at, 46.0);
+                paint_mouse_particle_field(ui, &self.mouse_particle_field, screen_rect);
+                ui.add_space(10.0);
+                ui.horizontal_wrapped(|ui| {
+                    render_brand_header(
+                        ui,
+                        self.logo_circle_texture.as_ref(),
+                        self.logo_wordmark_texture.as_ref(),
+                    );
+                    if let Some(started_at) = self.block_found_animation_started_at {
+                        if started_at.elapsed() <= Duration::from_secs(5) {
+                            if let Some(animation) = &self.money_animation {
+                                ui.add_space(6.0);
+                                render_animated_texture(ui, animation, started_at, 46.0);
+                            }
                         }
                     }
+                    ui.add_space(10.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(150.0, 44.0),
+                        egui::Layout::bottom_up(Align::Min),
+                        |ui| {
+                            ui.label(
+                                RichText::new(DESKTOP_PLATFORM_LABEL)
+                                    .size(13.0)
+                                    .color(theme_accent()),
+                            );
+                        },
+                    );
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new(&self.status).color(theme_text()));
+                if let Some(error) = &self.error {
+                    ui.add_space(6.0);
+                    ui.colored_label(theme_error(), error);
                 }
                 ui.add_space(10.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(150.0, 44.0),
-                    egui::Layout::bottom_up(Align::Min),
-                    |ui| {
-                        ui.label(
-                            RichText::new(DESKTOP_PLATFORM_LABEL)
-                                .size(13.0)
-                                .color(theme_accent()),
-                        );
-                    },
-                );
             });
-            ui.add_space(8.0);
-            ui.label(RichText::new(&self.status).color(theme_text()));
-            if let Some(error) = &self.error {
-                ui.add_space(6.0);
-                ui.colored_label(theme_error(), error);
-            }
-            ui.add_space(10.0);
-        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             paint_mouse_particle_field(ui, &self.mouse_particle_field, screen_rect);
@@ -1196,8 +1305,8 @@ impl App for BlockMineStudioApp {
 
                     ui.columns(2, |columns| {
                         columns[0].vertical(|ui| {
-                            render_miner_controls_card(ui, self);
                             render_wallet_card(ui, self);
+                            render_miner_controls_card(ui, self);
                         });
 
                         columns[1].vertical(|ui| {
@@ -1210,9 +1319,10 @@ impl App for BlockMineStudioApp {
 
         if self.show_deposit_modal {
             let mut open = true;
-            egui::Window::new("Deposit")
+            egui::Window::new("Fund desktop wallet")
                 .collapsible(false)
                 .resizable(false)
+                .default_width(560.0)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     let wallet_address = self
@@ -1220,28 +1330,41 @@ impl App for BlockMineStudioApp {
                         .as_ref()
                         .map(|wallet| wallet.pubkey.clone())
                         .unwrap_or_else(|| "Not ready yet".to_string());
+                    let suggested_lamports = sol_to_lamports(self.web3_deposit_sol.max(0.1));
+                    let mined_blocks_target = (suggested_lamports / TREASURY_FEE_PER_BLOCK_LAMPORTS).max(1);
                     ui.label(
-                        "Top up the desktop mining wallet with SOL. That balance is used to pay the 0.01 SOL treasury fee whenever a winning block is submitted.",
+                        RichText::new(
+                            "Choose how you want to fund the desktop miner. Web3 opens the in-browser flow, manual funding lets you send SOL from any wallet."
+                        )
+                        .color(theme_muted()),
                     );
                     ui.add_space(10.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui
                             .add(
                                 egui::Button::new(
-                                    RichText::new("Web3 wallet").color(theme_button_text()),
+                                    RichText::new("Web3 funding").color(theme_button_text()),
                                 )
-                                .fill(theme_accent())
+                                .fill(if matches!(self.deposit_method, DepositMethod::Web3Wallet) {
+                                    theme_accent()
+                                } else {
+                                    theme_card_alt()
+                                })
                                 .min_size(egui::vec2(180.0, 38.0)),
                             )
                             .clicked()
                         {
                             self.deposit_method = DepositMethod::Web3Wallet;
-                            self.open_web3_deposit_flow();
                         }
 
                         if ui
                             .add(
-                                egui::Button::new("Manual send")
+                                egui::Button::new("Manual funding")
+                                    .fill(if matches!(self.deposit_method, DepositMethod::ManualSend) {
+                                        theme_accent()
+                                    } else {
+                                        theme_card_alt()
+                                    })
                                     .min_size(egui::vec2(180.0, 38.0)),
                             )
                             .clicked()
@@ -1254,41 +1377,60 @@ impl App for BlockMineStudioApp {
                         .fill(theme_card_alt())
                         .stroke(egui::Stroke::new(1.0, theme_border()))
                         .rounding(egui::Rounding::same(14.0))
-                        .inner_margin(egui::Margin::same(12.0))
+                        .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
                             let hint = match self.deposit_method {
-                                DepositMethod::Web3Wallet => "The browser deposit flow opens your wallet extension and builds the transfer for you, just like before.",
-                                DepositMethod::ManualSend => "Copy this wallet and send SOL manually from any external address. The balance will update live in the miner.",
+                                DepositMethod::Web3Wallet => "Set the amount, then open the browser bridge. Your wallet extension prepares the transfer for the desktop miner.",
+                                DepositMethod::ManualSend => "Copy the desktop wallet address and send SOL manually from any external Solana wallet.",
                             };
                             ui.label(RichText::new(hint).color(theme_muted()));
                             ui.add_space(8.0);
                             labeled_value(ui, "Desktop wallet", wallet_address.clone());
-                            labeled_value(
-                                ui,
-                                "Suggested deposit",
-                                format!(
-                                    "{} SOL for up to {} winning blocks",
-                                    format_sol_compact(desktop_session_fee_budget_lamports(self.phantom_session_max_blocks)),
-                                    self.phantom_session_max_blocks
-                                ),
-                            );
                             ui.add_space(8.0);
-                            if matches!(self.deposit_method, DepositMethod::ManualSend) {
+                            if matches!(self.deposit_method, DepositMethod::Web3Wallet) {
+                                ui.label(RichText::new("Web3 deposit amount").color(theme_accent()));
+                                ui.add(
+                                    egui::Slider::new(&mut self.web3_deposit_sol, 0.1..=100.0)
+                                        .suffix(" SOL")
+                                        .logarithmic(false)
+                                        .clamp_to_range(true),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} SOL keeps roughly {} blocks funded at the current protocol fee.",
+                                        format_sol_compact(suggested_lamports),
+                                        mined_blocks_target
+                                    ))
+                                    .color(theme_muted()),
+                                );
+                                ui.add_space(8.0);
                                 if ui
                                     .add(
                                         egui::Button::new(
-                                            RichText::new("Copy wallet address")
+                                            RichText::new("Open web3 funding")
                                                 .color(theme_button_text()),
                                         )
                                         .fill(theme_accent())
-                                        .min_size(egui::vec2(190.0, 36.0)),
+                                        .min_size(egui::vec2(220.0, 40.0)),
                                     )
                                     .clicked()
                                 {
-                                    ui.ctx().copy_text(wallet_address.clone());
-                                    self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
-                                    self.error = None;
+                                    self.open_web3_deposit_flow();
                                 }
+                            } else if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("Copy wallet address")
+                                            .color(theme_button_text()),
+                                    )
+                                    .fill(theme_accent())
+                                    .min_size(egui::vec2(220.0, 40.0)),
+                                )
+                                .clicked()
+                            {
+                                ui.ctx().copy_text(wallet_address.clone());
+                                self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
+                                self.error = None;
                             }
                         });
                     ui.add_space(12.0);
@@ -1299,6 +1441,124 @@ impl App for BlockMineStudioApp {
                     });
                 });
             self.show_deposit_modal = self.show_deposit_modal && open;
+        }
+
+        if self.show_seed_phrase_warning_modal {
+            let mut open = true;
+            egui::Window::new("Reveal seed phrase")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(480.0)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label(
+                        RichText::new(
+                            "Do not share these words. Anyone with the recovery phrase controls the funds in this wallet. Make sure you are not on a screen share or recording before continuing."
+                        )
+                        .color(theme_muted()),
+                    );
+                    ui.add_space(14.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            self.show_seed_phrase_warning_modal = false;
+                        }
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("I understand, reveal")
+                                        .color(theme_button_text()),
+                                )
+                                .fill(theme_accent())
+                                .min_size(egui::vec2(180.0, 38.0)),
+                            )
+                            .clicked()
+                        {
+                            self.show_seed_phrase_warning_modal = false;
+                            self.open_seed_phrase_for_wallet(false);
+                        }
+                    });
+                });
+            self.show_seed_phrase_warning_modal = self.show_seed_phrase_warning_modal && open;
+        }
+
+        if self.show_seed_phrase_modal {
+            let mut open = true;
+            egui::Window::new("Recovery phrase")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(620.0)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label(
+                        RichText::new(
+                            "These 12 words recover the desktop mining wallet. Store them offline and keep them private."
+                        )
+                        .color(theme_muted()),
+                    );
+                    ui.add_space(12.0);
+                    egui::Frame::group(ui.style())
+                        .fill(theme_card_alt())
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .rounding(egui::Rounding::same(18.0))
+                        .inner_margin(egui::Margin::same(16.0))
+                        .show(ui, |ui| {
+                            egui::Grid::new("seed_phrase_grid")
+                                .num_columns(2)
+                                .spacing(egui::vec2(14.0, 12.0))
+                                .show(ui, |ui| {
+                                    for (index, word) in self.seed_phrase_words.iter().enumerate() {
+                                        ui.label(
+                                            RichText::new(format!("{:02}. {}", index + 1, word))
+                                                .monospace()
+                                                .color(theme_text())
+                                                .size(18.0),
+                                        );
+                                        if index % 2 == 1 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+                    ui.add_space(12.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Copy phrase").color(theme_button_text()),
+                                )
+                                .fill(theme_accent())
+                                .min_size(egui::vec2(160.0, 38.0)),
+                            )
+                            .clicked()
+                        {
+                            ui.ctx().copy_text(self.seed_phrase_words.join(" "));
+                            self.status =
+                                "Recovery phrase copied. Store it somewhere safe and offline."
+                                    .to_string();
+                            self.error = None;
+                        }
+                        if self.seed_phrase_requires_ack {
+                            if ui
+                                .add(
+                                    egui::Button::new("I saved the recovery phrase")
+                                        .min_size(egui::vec2(220.0, 38.0)),
+                                )
+                                .clicked()
+                            {
+                                self.seed_phrase_acknowledged = true;
+                                self.show_seed_phrase_modal = false;
+                            }
+                        } else if ui.button("Close").clicked() {
+                            self.show_seed_phrase_modal = false;
+                        }
+                    });
+                });
+            if self.seed_phrase_requires_ack && !self.seed_phrase_acknowledged && !open {
+                open = true;
+            }
+            self.show_seed_phrase_modal = self.show_seed_phrase_modal
+                && open
+                && !(self.seed_phrase_requires_ack && self.seed_phrase_acknowledged);
         }
 
         if self.show_withdrawal_modal {
@@ -1463,12 +1723,36 @@ impl App for BlockMineStudioApp {
                 .default_size(egui::vec2(860.0, 720.0))
                 .open(&mut open)
                 .show(ctx, |ui| {
+                    let current_era = reward_era_for_block(self.latest_snapshot.current_block_number);
                     ui.label(
                         RichText::new(
-                            "This is the exact mining curve currently embedded in the protocol reset plan.",
+                            "Blockmine follows a fixed era schedule. Read the curve below to see where emissions are now and how the supply decays over time.",
                         )
                         .color(theme_muted()),
                     );
+                    ui.add_space(10.0);
+                    egui::Frame::group(ui.style())
+                        .fill(theme_card_alt())
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .rounding(egui::Rounding::same(16.0))
+                        .inner_margin(egui::Margin::same(14.0))
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(RichText::new("Current era").color(theme_muted()));
+                                ui.label(
+                                    RichText::new(decode_era_name(current_era.name))
+                                        .strong()
+                                        .color(theme_accent()),
+                                );
+                                ui.separator();
+                                ui.label(RichText::new("Current block").color(theme_muted()));
+                                ui.label(
+                                    RichText::new(format!("#{}", self.latest_snapshot.current_block_number))
+                                        .strong()
+                                        .color(theme_text()),
+                                );
+                            });
+                        });
                     ui.add_space(10.0);
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         egui::Frame::group(ui.style())
@@ -1479,7 +1763,7 @@ impl App for BlockMineStudioApp {
                                 ui.add_space(10.0);
                                 egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
                                     egui::Grid::new("era_schedule_grid")
-                                        .striped(true)
+                                        .striped(false)
                                         .min_col_width(78.0)
                                         .spacing(egui::vec2(16.0, 10.0))
                                         .show(ui, |ui| {
@@ -1493,7 +1777,7 @@ impl App for BlockMineStudioApp {
                                             ui.end_row();
 
                                             for row in ERA_SCHEDULE_ROWS {
-                                                let is_current = row.era == reward_era_for_block(self.latest_snapshot.current_block_number).index;
+                                                let is_current = row.era == current_era.index;
                                                 let mined_progress = format_era_progress(row, self.latest_snapshot.current_block_number);
                                                 render_schedule_cell(ui, row.era.to_string(), true, is_current);
                                                 render_schedule_cell(ui, row.name, false, is_current);
@@ -1527,12 +1811,27 @@ impl App for BlockMineStudioApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {}
 }
 
-fn desktop_session_fee_budget_lamports(max_blocks: u64) -> u64 {
-    let treasury_budget = max_blocks.saturating_mul(TREASURY_FEE_PER_BLOCK_LAMPORTS);
-    let network_buffer = SESSION_NETWORK_BUFFER_BASE_LAMPORTS
-        .saturating_add(max_blocks.saturating_mul(SESSION_NETWORK_BUFFER_PER_BLOCK_LAMPORTS));
+fn split_seed_phrase_words(phrase: &str) -> Vec<String> {
+    phrase
+        .split_whitespace()
+        .map(|word| word.trim().to_string())
+        .filter(|word| !word.is_empty())
+        .collect()
+}
 
-    treasury_budget.saturating_add(network_buffer)
+fn detect_cpu_model() -> String {
+    let mut system = System::new_all();
+    system.refresh_cpu_all();
+    system
+        .cpus()
+        .first()
+        .map(|cpu| cpu.brand().trim().to_string())
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| "Desktop CPU".to_string())
+}
+
+fn sol_to_lamports(sol: f32) -> u64 {
+    (sol.max(0.0) as f64 * 1_000_000_000.0).round() as u64
 }
 
 fn format_sol_compact(lamports: u64) -> String {
@@ -1553,7 +1852,10 @@ fn format_session_sweep_summary(summary: &SessionSweepSummary) -> String {
             .to_string();
     }
 
-    match (summary.total_sent_lamports > 0, summary.total_sent_bloc_raw > 0) {
+    match (
+        summary.total_sent_lamports > 0,
+        summary.total_sent_bloc_raw > 0,
+    ) {
         (true, true) => format!(
             "Withdrawal finished. Sent {} SOL and {} BLOC from the desktop mining wallet.",
             format_sol_compact(summary.total_sent_lamports),
@@ -1646,12 +1948,16 @@ fn render_schedule_cell(
     monospace: bool,
     highlight: bool,
 ) {
-    let mut text = RichText::new(value.into()).color(theme_text());
+    let mut text = RichText::new(value.into()).color(if highlight {
+        theme_accent()
+    } else {
+        theme_text()
+    });
     if monospace {
         text = text.family(egui::FontFamily::Monospace);
     }
     if highlight {
-        text = text.background_color(Color32::from_rgba_premultiplied(232, 137, 48, 24));
+        text = text.strong();
     }
     ui.label(text);
 }
@@ -1662,8 +1968,8 @@ fn load_desktop_ui_preferences() -> Result<Option<DesktopUiPreferences>> {
         return Ok(None);
     }
 
-    let raw = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let raw =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
     let preferences = serde_json::from_str::<DesktopUiPreferences>(&raw)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(preferences))
@@ -1751,9 +2057,7 @@ fn scarcity_progress(completed_blocks: u64) -> u64 {
 
 fn format_bloc_trimmed(amount: u64) -> String {
     let raw = format_bloc(amount);
-    raw.trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string()
+    raw.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 fn theme_bg() -> Color32 {
@@ -1844,10 +2148,7 @@ fn paint_mouse_particle_field(
                 let alpha = ((1.0 - distance / BACKGROUND_LINK_DISTANCE) * 24.0).round() as u8;
                 painter.line_segment(
                     [particle.position, other.position],
-                    egui::Stroke::new(
-                        1.0,
-                        Color32::from_rgba_premultiplied(232, 137, 48, alpha),
-                    ),
+                    egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(232, 137, 48, alpha)),
                 );
             }
         }
@@ -1903,11 +2204,7 @@ fn apply_brand_visuals(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
-fn load_embedded_texture(
-    ctx: &egui::Context,
-    name: &str,
-    bytes: &[u8],
-) -> Result<TextureHandle> {
+fn load_embedded_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Result<TextureHandle> {
     let image = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .context("failed to detect embedded image format")?
@@ -1920,11 +2217,7 @@ fn load_embedded_texture(
     Ok(ctx.load_texture(name.to_string(), color_image, TextureOptions::LINEAR))
 }
 
-fn load_embedded_gif(
-    ctx: &egui::Context,
-    name: &str,
-    bytes: &[u8],
-) -> Result<AnimatedTexture> {
+fn load_embedded_gif(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Result<AnimatedTexture> {
     let decoder = GifDecoder::new(Cursor::new(bytes)).context("failed to decode embedded gif")?;
     let frames = decoder
         .into_frames()
@@ -1970,10 +2263,7 @@ fn render_brand_header(
 ) {
     ui.horizontal(|ui| {
         if let Some(texture) = circle_texture {
-            ui.add(
-                egui::Image::new(texture)
-                    .fit_to_exact_size(egui::vec2(52.0, 52.0))
-            );
+            ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(52.0, 52.0)));
         }
 
         if let Some(texture) = wordmark_texture {
@@ -1982,7 +2272,7 @@ fn render_brand_header(
             let target_width = (size.x / size.y.max(1.0)) * target_height;
             ui.add(
                 egui::Image::new(texture)
-                    .fit_to_exact_size(egui::vec2(target_width, target_height))
+                    .fit_to_exact_size(egui::vec2(target_width, target_height)),
             );
         } else {
             ui.heading(RichText::new("BlockMine").size(30.0).color(theme_text()));
@@ -2004,8 +2294,7 @@ fn render_animated_texture(
     let size = frame.texture.size_vec2();
     let target_width = (size.x / size.y.max(1.0)) * target_height;
     ui.add(
-        egui::Image::new(&frame.texture)
-            .fit_to_exact_size(egui::vec2(target_width, target_height)),
+        egui::Image::new(&frame.texture).fit_to_exact_size(egui::vec2(target_width, target_height)),
     );
 }
 
@@ -2094,14 +2383,15 @@ fn metric_chip(ui: &mut egui::Ui, label: &str, value: impl Into<String>) {
 }
 
 fn decode_era_name(name: [u8; ERA_NAME_LEN]) -> String {
-    let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    let end = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
     String::from_utf8_lossy(&name[..end]).into_owned()
 }
 
 fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
     card_frame(ui, "Wallet", |ui| {
-        let estimated_session_preload_lamports =
-            desktop_session_fee_budget_lamports(app.phantom_session_max_blocks);
         let total_session_balance_lamports = app
             .session_balance_summary
             .as_ref()
@@ -2126,25 +2416,19 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             total_session_balance_lamports / TREASURY_FEE_PER_BLOCK_LAMPORTS;
 
         ui.label(
-            "Keep some SOL in the desktop mining wallet so each winning block can pay the 0.01 SOL treasury fee without interrupting your run.",
+            "The desktop miner uses one local wallet on this machine. Keep a little SOL inside and it can keep mined blocks flowing without interruption.",
         );
         ui.add_space(8.0);
-        ui.label(
-            RichText::new(format!(
-                "Estimated funding target: {} SOL for up to {} winning blocks.",
-                format_sol_compact(estimated_session_preload_lamports),
-                app.phantom_session_max_blocks
-            ))
-            .color(theme_muted()),
-        );
-        ui.add_space(10.0);
         egui::Frame::group(ui.style())
             .fill(theme_card_alt())
             .stroke(egui::Stroke::new(1.0, theme_border()))
-            .rounding(egui::Rounding::same(14.0))
-            .inner_margin(egui::Margin::same(12.0))
+            .rounding(egui::Rounding::same(18.0))
+            .inner_margin(egui::Margin::same(16.0))
             .show(ui, |ui| {
                 labeled_value(ui, "Desktop wallet", desktop_wallet_address);
+                if let Some(wallet) = app.active_wallet.as_ref() {
+                    labeled_value(ui, "Wallet type", format_wallet_source_label(wallet));
+                }
                 labeled_value(
                     ui,
                     "Balance (SOL)",
@@ -2161,35 +2445,18 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                 labeled_value(
                     ui,
                     "Blocks mineable",
-                    format!("{} winning blocks", session_blocks_mineable),
+                    format!("{session_blocks_mineable} blocks"),
                 );
             });
 
         ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.label("Session block cap");
-            ui.add(
-                egui::Slider::new(
-                    &mut app.phantom_session_max_blocks,
-                    1..=MAX_PHANTOM_SESSION_BLOCKS,
-                )
-                .clamp_to_range(true)
-                .show_value(false),
-            );
-            ui.label(
-                RichText::new(format!("{} blocks", app.phantom_session_max_blocks))
-                    .color(theme_accent()),
-            );
-        });
-        ui.label(
-            RichText::new(
-                "Use this target to decide how much SOL you want to keep ready in the desktop wallet.",
-            )
-            .color(theme_muted()),
-        );
-
-        ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
+            if ui
+                .add(egui::Button::new("Reveal seed phrase").min_size(egui::vec2(170.0, 44.0)))
+                .clicked()
+            {
+                app.show_seed_phrase_warning_modal = true;
+            }
             if let Some(animation) = &app.wallet_animation {
                 render_animated_texture(ui, animation, app.wallet_animation_started_at, 64.0);
             }
@@ -2222,7 +2489,11 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
     card_frame(ui, "Miner controls", |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut app.miner_controls_mode, MinerControlsMode::Fast, "Fast");
+            ui.selectable_value(
+                &mut app.miner_controls_mode,
+                MinerControlsMode::Fast,
+                "Fast",
+            );
             ui.selectable_value(
                 &mut app.miner_controls_mode,
                 MinerControlsMode::Advanced,
@@ -2234,45 +2505,83 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
         match app.miner_controls_mode {
             MinerControlsMode::Fast => {
                 ui.label(
-                    RichText::new(
-                        "Pick the mining path you want and start immediately. GPU mode still lets you choose which cards to use.",
-                    )
-                    .color(theme_muted()),
+                    RichText::new("Pick one engine, check the hardware label, then start mining.")
+                        .color(theme_muted()),
                 );
                 ui.add_space(10.0);
-                render_gpu_picker(ui, app, false);
+                ui.columns(2, |columns| {
+                    render_fast_mode_choice(
+                        &mut columns[0],
+                        "CPU",
+                        &app.cpu_model_label,
+                        app.fast_mining_choice == FastMiningChoice::Cpu,
+                    );
+                    render_fast_mode_choice(
+                        &mut columns[1],
+                        "GPU",
+                        &selected_gpu_summary(app),
+                        app.fast_mining_choice == FastMiningChoice::Gpu,
+                    );
+                });
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    let cpu_selected = app.fast_mining_choice == FastMiningChoice::Cpu;
+                    if ui.selectable_label(cpu_selected, "Mine with CPU").clicked() {
+                        app.fast_mining_choice = FastMiningChoice::Cpu;
+                        app.backend = BackendMode::Cpu;
+                    }
+                    let gpu_selected = app.fast_mining_choice == FastMiningChoice::Gpu;
+                    if ui.selectable_label(gpu_selected, "Mine with GPU").clicked() {
+                        app.fast_mining_choice = FastMiningChoice::Gpu;
+                        app.backend = BackendMode::Gpu;
+                    }
+                });
+                if app.fast_mining_choice == FastMiningChoice::Gpu {
+                    ui.add_space(10.0);
+                    render_gpu_picker(ui, app, false);
+                } else {
+                    ui.add_space(10.0);
+                    egui::Frame::group(ui.style())
+                        .fill(theme_card_alt())
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .rounding(egui::Rounding::same(16.0))
+                        .inner_margin(egui::Margin::same(14.0))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("Selected CPU").color(theme_accent()));
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(&app.cpu_model_label)
+                                    .color(theme_text())
+                                    .size(20.0),
+                            );
+                        });
+                }
                 ui.add_space(12.0);
                 ui.horizontal_wrapped(|ui| {
                     if ui
                         .add_enabled(
                             app.mining_handle.is_none(),
                             egui::Button::new(
-                                RichText::new("CPU Mine").color(theme_button_text()),
+                                RichText::new(match app.fast_mining_choice {
+                                    FastMiningChoice::Cpu => "Start CPU mining",
+                                    FastMiningChoice::Gpu => "Start GPU mining",
+                                })
+                                .color(theme_button_text()),
                             )
                             .fill(theme_accent())
-                            .min_size(egui::vec2(180.0, 42.0)),
+                            .min_size(egui::vec2(220.0, 46.0)),
                         )
                         .clicked()
                     {
-                        app.start_cpu_mining();
-                    }
-                    if ui
-                        .add_enabled(
-                            app.mining_handle.is_none(),
-                            egui::Button::new(
-                                RichText::new("GPU Mine").color(theme_button_text()),
-                            )
-                            .fill(theme_accent())
-                            .min_size(egui::vec2(180.0, 42.0)),
-                        )
-                        .clicked()
-                    {
-                        app.start_gpu_mining();
+                        match app.fast_mining_choice {
+                            FastMiningChoice::Cpu => app.start_cpu_mining(),
+                            FastMiningChoice::Gpu => app.start_gpu_mining(),
+                        }
                     }
                     if ui
                         .add_enabled(
                             app.mining_handle.is_some(),
-                            egui::Button::new("Stop mining").min_size(egui::vec2(140.0, 42.0)),
+                            egui::Button::new("Stop mining").min_size(egui::vec2(160.0, 46.0)),
                         )
                         .clicked()
                     {
@@ -2281,33 +2590,46 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                 });
             }
             MinerControlsMode::Advanced => {
-                ui.horizontal(|ui| {
-                    ui.label("RPC");
-                    ui.add(TextEdit::singleline(&mut app.rpc_url).desired_width(320.0));
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Program");
-                    ui.add(TextEdit::singleline(&mut app.program_id).desired_width(320.0));
-                });
+                ui.label(
+                    RichText::new(
+                        "Advanced is for infrastructure and tuning. The protocol program stays locked to Blockmine.",
+                    )
+                    .color(theme_muted()),
+                );
+                ui.add_space(12.0);
+                egui::Frame::group(ui.style())
+                    .fill(theme_card_alt())
+                    .stroke(egui::Stroke::new(1.0, theme_border()))
+                    .rounding(egui::Rounding::same(16.0))
+                    .inner_margin(egui::Margin::same(14.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("RPC endpoint").color(theme_accent()));
+                        ui.add_space(6.0);
+                        ui.add(
+                            TextEdit::singleline(&mut app.rpc_url)
+                                .desired_width(ui.available_width()),
+                        );
+                        ui.add_space(10.0);
+                        ui.label(RichText::new("Program").color(theme_muted()));
+                        ui.label(
+                            RichText::new(&app.program_id)
+                                .family(egui::FontFamily::Monospace)
+                                .color(theme_text()),
+                        );
+                    });
                 ui.add_space(12.0);
 
-                egui::ComboBox::from_label("Backend")
-                    .selected_text(match app.backend {
-                        BackendMode::Cpu => "CPU",
-                        BackendMode::Gpu => "GPU",
-                        BackendMode::Both => "GPU",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut app.backend, BackendMode::Cpu, "CPU");
-                        ui.selectable_value(&mut app.backend, BackendMode::Gpu, "GPU");
-                    });
+                ui.horizontal_wrapped(|ui| {
+                    ui.selectable_value(&mut app.backend, BackendMode::Cpu, "CPU tuning");
+                    ui.selectable_value(&mut app.backend, BackendMode::Gpu, "GPU tuning");
+                });
 
                 ui.add_space(8.0);
                 match app.backend {
                     BackendMode::Cpu => {
                         ui.label(
                             RichText::new(
-                                "Tune CPU batch size, thread count, and core pinning for rigs that need more control.",
+                                "Tune batch size, worker count and pinned cores for CPU-only rigs.",
                             )
                             .color(theme_muted()),
                         );
@@ -2319,7 +2641,7 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                     BackendMode::Gpu | BackendMode::Both => {
                         ui.label(
                             RichText::new(
-                                "Select one or more GPUs, then only touch the advanced tuning if you really need it. Auto-tune settings are saved locally.",
+                                "Pick the cards you want, then fine-tune batch and work size only if you really need to.",
                             )
                             .color(theme_muted()),
                         );
@@ -2363,7 +2685,7 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 }
 
 fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
-    card_frame(ui, "Live miner telemetry", |ui| {
+    card_frame(ui, "Protocol telemetry", |ui| {
         let current_era = reward_era_for_block(app.latest_snapshot.current_block_number);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Current era").color(theme_muted()).size(13.0));
@@ -2375,14 +2697,9 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             );
             if ui
                 .add(
-                    egui::Button::new(
-                        RichText::new("i")
-                            .color(theme_text())
-                            .size(12.0)
-                            .strong(),
-                    )
-                    .min_size(egui::vec2(22.0, 22.0))
-                    .fill(theme_card_alt()),
+                    egui::Button::new(RichText::new("i").color(theme_text()).size(12.0).strong())
+                        .min_size(egui::vec2(22.0, 22.0))
+                        .fill(theme_card_alt()),
                 )
                 .on_hover_text("Open the full mining curve")
                 .clicked()
@@ -2392,7 +2709,11 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
         });
         ui.add_space(10.0);
         ui.columns(2, |cols| {
-            metric(&mut cols[0], "Current block", format!("#{}", app.latest_snapshot.current_block_number));
+            metric(
+                &mut cols[0],
+                "Current block",
+                format!("#{}", app.latest_snapshot.current_block_number),
+            );
             metric(
                 &mut cols[1],
                 "Difficulty",
@@ -2405,38 +2726,18 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             );
             metric(
                 &mut cols[1],
-                "Current era",
-                decode_era_name(current_era.name),
-            );
-            metric(
-                &mut cols[0],
-                "Hashrate",
-                format_hashrate_compact(app.display_hashrate_hps),
-            );
-            metric(
-                &mut cols[1],
-                "Session wins",
+                "Blocks mined",
                 app.latest_snapshot.session_blocks_mined.to_string(),
-            );
-            metric(
-                &mut cols[0],
-                "Session BLOC",
-                format!("{} BLOC", format_bloc(app.latest_snapshot.session_tokens_mined)),
-            );
-            metric(
-                &mut cols[1],
-                "Treasury fees",
-                format!("{} BLOC", format_bloc(app.latest_snapshot.protocol_treasury_fees)),
             );
         });
     });
 }
 
 fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
-    card_frame(ui, "Live compute signal", |ui| {
+    card_frame(ui, "Mining stats", |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new("Desktop mining output in real time")
+                RichText::new("Live desktop miner output")
                     .size(24.0)
                     .color(Color32::WHITE),
             );
@@ -2444,7 +2745,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
         ui.add_space(6.0);
         ui.label(
             RichText::new(
-                "The line stays still and adds one new point every 30 seconds. Each point is the highest hashrate seen in the last 30-second window.",
+                "Real-time output from your rig. Hover the curve to inspect each 30-second peak.",
             )
             .color(theme_muted()),
         );
@@ -2463,7 +2764,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
             );
             metric_chip(
                 &mut columns[2],
-                "Session wins",
+                "Blocks mined",
                 app.latest_snapshot.session_blocks_mined.to_string(),
             );
         });
@@ -2477,7 +2778,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
             .show(ui, |ui| {
                 let chart_height = 220.0;
                 let desired_size = egui::vec2(ui.available_width(), chart_height);
-                let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+                let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
                 let painter = ui.painter_at(rect);
                 let grid_color = Color32::from_rgba_premultiplied(88, 88, 96, 120);
 
@@ -2521,9 +2822,44 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
 
                 if app.hashrate_chart.committed_peaks.len() >= 2 {
                     painter.add(egui::Shape::line(
-                        points,
+                        points.clone(),
                         egui::Stroke::new(3.5, theme_accent()),
                     ));
+                    if response.hovered() {
+                        if let Some(pointer) = response.hover_pos() {
+                            if let Some((index, point)) =
+                                points.iter().enumerate().min_by(|(_, left), (_, right)| {
+                                    (left.x - pointer.x)
+                                        .abs()
+                                        .partial_cmp(&(right.x - pointer.x).abs())
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                            {
+                                painter.line_segment(
+                                    [
+                                        egui::pos2(point.x, rect.top()),
+                                        egui::pos2(point.x, rect.bottom()),
+                                    ],
+                                    egui::Stroke::new(1.0, theme_accent_soft()),
+                                );
+                                painter.circle_filled(*point, 5.0, theme_accent());
+                                egui::show_tooltip_at_pointer(
+                                    ui.ctx(),
+                                    egui::Id::new("hashrate_chart_point_tooltip"),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format_hashrate_compact(series[index]))
+                                                .strong()
+                                                .color(theme_text()),
+                                        );
+                                        ui.label(
+                                            RichText::new("30-second peak").color(theme_muted()),
+                                        );
+                                    },
+                                );
+                            }
+                        }
+                    }
                 } else {
                     painter.text(
                         rect.center(),
@@ -2549,10 +2885,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
             metric_chip(
                 &mut columns[1],
                 "Chart average",
-                format_hashrate_compact(
-                    app.hashrate_chart
-                        .chart_average(app.display_hashrate_hps),
-                ),
+                format_hashrate_compact(app.hashrate_chart.chart_average(app.display_hashrate_hps)),
             );
             metric_chip(&mut columns[2], "Runtime", app.runtime_label());
         });
@@ -2610,8 +2943,7 @@ fn render_mining_action_row(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             .add_enabled(
                 wallet_ready && !mining_live,
                 egui::Button::new(
-                    RichText::new("Start mining with this wallet")
-                        .color(theme_button_text()),
+                    RichText::new("Start mining with this wallet").color(theme_button_text()),
                 )
                 .fill(theme_accent())
                 .min_size(egui::vec2(240.0, 42.0)),
@@ -2657,7 +2989,10 @@ fn render_cpu_core_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
     ui.horizontal_wrapped(|ui| {
         let auto_selected = app.selected_cpu_cores.is_empty();
         if ui
-            .selectable_label(auto_selected, format!("Auto (all {} cores)", app.available_cpu_cores.len()))
+            .selectable_label(
+                auto_selected,
+                format!("Auto (all {} cores)", app.available_cpu_cores.len()),
+            )
             .clicked()
         {
             app.selected_cpu_cores.clear();
@@ -2698,17 +3033,15 @@ fn render_cpu_core_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 
     let selected_summary = selected_cpu_cores(&app.selected_cpu_cores)
         .map(|cores| {
-            cores.into_iter()
+            cores
+                .into_iter()
                 .map(|core| core.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         })
         .unwrap_or_else(|| "all logical cores".to_string());
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(format!("Pinned CPUs: {selected_summary}"))
-            .color(theme_muted()),
-    );
+    ui.label(RichText::new(format!("Pinned CPUs: {selected_summary}")).color(theme_muted()));
 }
 
 fn render_gpu_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp, show_autotune: bool) {
@@ -2717,10 +3050,7 @@ fn render_gpu_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp, show_autot
             .size(14.0)
             .color(theme_accent()),
     );
-    ui.label(
-        RichText::new("Tick the GPUs you want to mine with. The miner launches one worker per selected device and sums the throughput.")
-            .color(theme_muted()),
-    );
+    ui.label(RichText::new("Pick the cards you want to use for mining.").color(theme_muted()));
     ui.add_space(8.0);
 
     ui.horizontal_wrapped(|ui| {
@@ -2761,7 +3091,10 @@ fn render_gpu_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp, show_autot
             for device in app.gpu_devices.clone() {
                 let key = device_selection_key(&device);
                 let mut selected = app.selected_gpu_keys.contains(&key);
-                if ui.checkbox(&mut selected, format_gpu_device_label(&device)).changed() {
+                if ui
+                    .checkbox(&mut selected, format_gpu_device_label(&device))
+                    .changed()
+                {
                     if selected {
                         app.selected_gpu_keys.insert(key);
                     } else {
@@ -2795,47 +3128,44 @@ fn render_gpu_picker(ui: &mut egui::Ui, app: &mut BlockMineStudioApp, show_autot
                 for device in selected_devices.iter().copied() {
                     labeled_value(ui, "GPU", &device.device_name);
                     labeled_value(ui, "Vendor", &device.vendor);
-                    labeled_value(ui, "Platform", &device.platform_name);
                     labeled_value(ui, "Memory", format_gpu_memory(device.global_memory_bytes));
                     labeled_value(ui, "Compute units", device.max_compute_units.to_string());
-                    labeled_value(ui, "Max work-group", device.max_work_group_size.to_string());
                     ui.add_space(6.0);
                 }
             });
 
         if show_autotune {
             ui.add_space(10.0);
-            ui.horizontal_wrapped(|ui| {
-                let autotune_live = app.gpu_autotune_receiver.is_some();
-                if ui
-                    .add_enabled(
-                        !autotune_live && app.mining_handle.is_none(),
-                        egui::Button::new(
-                            RichText::new("Auto-tune selected GPUs")
-                                .color(theme_button_text()),
-                        )
-                        .fill(theme_accent())
-                        .min_size(egui::vec2(210.0, 38.0)),
+            let autotune_live = app.gpu_autotune_receiver.is_some();
+            if ui
+                .add_enabled(
+                    !autotune_live && app.mining_handle.is_none(),
+                    egui::Button::new(
+                        RichText::new("Auto-tune selected GPUs").color(theme_button_text()),
                     )
-                    .clicked()
-                {
-                    app.start_gpu_autotune();
-                }
-
-                if autotune_live {
-                    ui.label(
-                        RichText::new("Testing shared GPU profiles... this can take around 20-40 seconds.")
-                            .color(theme_muted()),
-                    );
-                } else {
-                    ui.label(
-                        RichText::new(
-                            "Auto-tune benchmarks the selected GPUs together and applies one shared profile with the best aggregate throughput.",
-                        )
-                        .color(theme_muted()),
-                    );
-                }
-            });
+                    .fill(theme_accent())
+                    .min_size(egui::vec2(210.0, 38.0)),
+                )
+                .clicked()
+            {
+                app.start_gpu_autotune();
+            }
+            ui.add_space(6.0);
+            if autotune_live {
+                ui.label(
+                    RichText::new(
+                        "Testing shared GPU profiles. This usually takes 20 to 40 seconds.",
+                    )
+                    .color(theme_muted()),
+                );
+            } else {
+                ui.label(
+                    RichText::new(
+                        "Auto-tune benchmarks the selected GPUs together and applies one shared profile with the best aggregate throughput.",
+                    )
+                    .color(theme_muted()),
+                );
+            }
 
             if let Some(status) = &app.gpu_autotune_status {
                 ui.add_space(6.0);
@@ -2899,10 +3229,57 @@ fn selected_cpu_cores(selected: &BTreeSet<usize>) -> Option<Vec<usize>> {
 }
 
 fn format_gpu_device_label(device: &GpuDeviceInfo) -> String {
-    format!(
-        "{} | {} | platform {} device {}",
-        device.device_name, device.vendor, device.platform_index, device.device_index
-    )
+    device.device_name.clone()
+}
+
+fn selected_gpu_summary(app: &BlockMineStudioApp) -> String {
+    let selected = app.selected_gpu_devices();
+    if selected.is_empty() {
+        "No GPU selected yet".to_string()
+    } else if selected.len() == 1 {
+        selected[0].device_name.clone()
+    } else {
+        format!("{} GPUs selected", selected.len())
+    }
+}
+
+fn render_fast_mode_choice(ui: &mut egui::Ui, label: &str, hardware: &str, selected: bool) {
+    let rounding = egui::Rounding::same(18.0);
+    let stroke = if selected {
+        egui::Stroke::new(1.2, theme_accent())
+    } else {
+        egui::Stroke::new(1.0, theme_border())
+    };
+    let fill = if selected {
+        Color32::from_rgba_premultiplied(41, 31, 24, 248)
+    } else {
+        theme_card_alt()
+    };
+    let response = egui::Frame::group(ui.style())
+        .fill(fill)
+        .stroke(stroke)
+        .rounding(rounding)
+        .inner_margin(egui::Margin::same(16.0))
+        .show(ui, |ui| {
+            ui.set_min_height(96.0);
+            ui.label(
+                RichText::new(label)
+                    .color(theme_accent())
+                    .strong()
+                    .size(16.0),
+            );
+            ui.add_space(8.0);
+            ui.label(RichText::new(hardware).color(theme_text()).size(20.0));
+        });
+    paint_frame_glow(ui, response.response.rect, rounding);
+}
+
+fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
+    match wallet.source {
+        WalletSource::DedicatedGenerated => "Dedicated wallet",
+        WalletSource::SessionDelegate => "Desktop wallet",
+        WalletSource::ImportedFile => "Imported keypair",
+    }
 }
 
 fn device_selection_key(device: &GpuDeviceInfo) -> String {
@@ -2985,7 +3362,9 @@ fn open_in_default_browser(url: &str) -> Result<()> {
     }
 
     #[allow(unreachable_code)]
-    Err(anyhow::anyhow!("opening the browser is not supported on this platform"))
+    Err(anyhow::anyhow!(
+        "opening the browser is not supported on this platform"
+    ))
 }
 
 fn build_gpu_autotune_candidates(devices: &[GpuDeviceInfo]) -> Vec<(u64, Option<usize>)> {
@@ -3102,7 +3481,8 @@ fn benchmark_gpu_profile(
         for device in devices.iter().cloned() {
             let sender = sender.clone();
             scope.spawn(move || {
-                let miner = GpuMiner::new(device.platform_index, device.device_index, local_work_size);
+                let miner =
+                    GpuMiner::new(device.platform_index, device.device_index, local_work_size);
                 let result = miner.benchmark_with_batch_size(2, batch_size);
                 let _ = sender.send(result);
             });
@@ -3117,14 +3497,15 @@ fn benchmark_gpu_profile(
             aggregate_elapsed = aggregate_elapsed.max(report.elapsed.as_secs_f64());
         }
 
-        Ok::<f64, anyhow::Error>(
-            aggregate_hashes as f64 / aggregate_elapsed.max(0.000_001),
-        )
+        Ok::<f64, anyhow::Error>(aggregate_hashes as f64 / aggregate_elapsed.max(0.000_001))
     })
 }
 
-fn start_phantom_bridge_listener(
-) -> Result<(Receiver<Result<PhantomBridgeCompletion, String>>, String, String)> {
+fn start_phantom_bridge_listener() -> Result<(
+    Receiver<Result<PhantomBridgeCompletion, String>>,
+    String,
+    String,
+)> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .context("failed to bind the local Phantom bridge listener")?;
     let port = listener
@@ -3248,7 +3629,7 @@ fn url_encode_component(input: &str) -> String {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 vec![byte as char]
             }
-            b' ' => vec!['%','2','0'],
+            b' ' => vec!['%', '2', '0'],
             _ => format!("%{:02X}", byte).chars().collect(),
         })
         .collect()
