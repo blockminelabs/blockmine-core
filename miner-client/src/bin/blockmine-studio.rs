@@ -26,7 +26,7 @@ use blockmine_miner::wallet_store::{
     app_storage_dir, create_session_delegate_wallet, load_managed_keypair, load_session_delegate_wallet,
     ManagedWallet, WalletSource,
 };
-use eframe::egui::{self, Align, Color32, RichText, TextEdit, TextureHandle, TextureOptions};
+use eframe::egui::{self, Align, Color32, IconData, RichText, TextEdit, TextureHandle, TextureOptions};
 use eframe::{App, Frame, NativeOptions};
 use image::{AnimationDecoder, ImageReader};
 use image::codecs::gif::GifDecoder;
@@ -50,6 +50,7 @@ const BACKGROUND_CURSOR_DISTANCE: f32 = 152.0;
 const BACKGROUND_PARTICLE_DENSITY: f32 = 0.0000455;
 const BACKGROUND_MIN_PARTICLES: usize = 44;
 const BACKGROUND_MAX_PARTICLES: usize = 117;
+const APP_ICON_PNG: &[u8] = include_bytes!("../../img/logocircle.png");
 
 #[cfg(target_os = "windows")]
 const DESKTOP_PLATFORM_LABEL: &str = "Windows Miner";
@@ -436,13 +437,27 @@ fn main() -> eframe::Result<()> {
     native_options.viewport = egui::ViewportBuilder::default()
         .with_inner_size([1320.0, 860.0])
         .with_min_inner_size([980.0, 700.0])
-        .with_title("BlockMine Studio");
+        .with_title("BlockMine Studio")
+        .with_icon(load_app_icon());
 
     eframe::run_native(
         "BlockMine Studio",
         native_options,
         Box::new(|cc| Box::new(BlockMineStudioApp::new(cc))),
     )
+}
+
+fn load_app_icon() -> IconData {
+    let image = image::load_from_memory(APP_ICON_PNG)
+        .expect("failed to decode app icon PNG")
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+
+    IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    }
 }
 
 struct BlockMineStudioApp {
