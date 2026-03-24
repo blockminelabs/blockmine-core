@@ -393,9 +393,9 @@ It uses a live difficulty system so blocks are **earned** by work, while the pro
 
 The current protocol target is:
 
-- **10 seconds average per block**
+- **about 15 seconds average per block**
 
-This is a target average, not a promise that every single block lands at exactly 10 seconds. Proof-of-work is probabilistic, so the goal is convergence in the mean, not deterministic cadence.
+This is a target average, not a promise that every single block lands at exactly 15 seconds. Proof-of-work is probabilistic, so the goal is convergence in the mean, not deterministic cadence.
 
 ### 6.2 Full 256-bit retarget
 
@@ -533,11 +533,14 @@ BlockMine launches with a fixed total minted supply of:
 That supply is split into:
 
 - **20,000,000 BLOC** reserved for protocol mining emissions
-- **1,000,000 BLOC** reserved for LP at launch
+- **550,000 BLOC** reserved for launch LP
+- **450,000 BLOC** reserved as treasury inventory
 
 The smart contract mining schedule covers only the **20,000,000 BLOC mining allocation**.
 
-The LP allocation is outside the mining schedule.
+The LP allocation and treasury reserve are outside the mining schedule.
+
+Era progression advances on successfully settled blocks, not on raw block openings. If a block expires and rotates stale, the schedule is preserved instead of silently burning emissions.
 
 ### 8.1 Era schedule
 
@@ -580,7 +583,7 @@ This is not an infinite-tail model.
 It is a capped mining schedule with:
 
 - `20M` mined through SMART MINING
-- `1M` reserved for LP at launch
+- `550k` reserved for launch LP and `450k` held as treasury reserve outside the mining schedule
 
 ---
 
@@ -910,15 +913,37 @@ It is not part of the public whitepaper pitch. It exists so remaining hardening 
 
 ### Implementation map
 
-For technical readers who want the exact code anchors:
+For technical readers who want the exact code anchors, these are the substantive Rust files that define protocol behavior today. The various `mod.rs` files are only module wiring and are omitted on purpose.
 
-- Reward curve: [`onchain/programs/blockmine/src/math/rewards.rs`](onchain/programs/blockmine/src/math/rewards.rs)
-- Difficulty logic: [`onchain/programs/blockmine/src/math/difficulty.rs`](onchain/programs/blockmine/src/math/difficulty.rs)
+#### On-chain program
+
+- Program entrypoints: [`onchain/programs/blockmine/src/lib.rs`](onchain/programs/blockmine/src/lib.rs)
+- Constants and seeds: [`onchain/programs/blockmine/src/constants.rs`](onchain/programs/blockmine/src/constants.rs)
+- Error surface: [`onchain/programs/blockmine/src/errors.rs`](onchain/programs/blockmine/src/errors.rs)
+- Events: [`onchain/programs/blockmine/src/events.rs`](onchain/programs/blockmine/src/events.rs)
+- Protocol init invariants: [`onchain/programs/blockmine/src/instructions/initialize_protocol.rs`](onchain/programs/blockmine/src/instructions/initialize_protocol.rs)
+- Miner registration: [`onchain/programs/blockmine/src/instructions/register_miner.rs`](onchain/programs/blockmine/src/instructions/register_miner.rs)
+- Nickname updates: [`onchain/programs/blockmine/src/instructions/update_nickname.rs`](onchain/programs/blockmine/src/instructions/update_nickname.rs)
 - Winning submit path: [`onchain/programs/blockmine/src/instructions/submit_solution.rs`](onchain/programs/blockmine/src/instructions/submit_solution.rs)
-- Session submit path: [`onchain/programs/blockmine/src/instructions/session_mining.rs`](onchain/programs/blockmine/src/instructions/session_mining.rs)
-- Stale rotation: [`onchain/programs/blockmine/src/instructions/rotate_stale_block.rs`](onchain/programs/blockmine/src/instructions/rotate_stale_block.rs)
-- Core config state: [`onchain/programs/blockmine/src/state/protocol_config.rs`](onchain/programs/blockmine/src/state/protocol_config.rs)
+- Session authorization and delegated submit path: [`onchain/programs/blockmine/src/instructions/session_mining.rs`](onchain/programs/blockmine/src/instructions/session_mining.rs)
+- Stale rotation and liveness recovery: [`onchain/programs/blockmine/src/instructions/rotate_stale_block.rs`](onchain/programs/blockmine/src/instructions/rotate_stale_block.rs)
+- Devnet-only admin/tuning surface: [`onchain/programs/blockmine/src/instructions/admin.rs`](onchain/programs/blockmine/src/instructions/admin.rs)
+- Difficulty logic: [`onchain/programs/blockmine/src/math/difficulty.rs`](onchain/programs/blockmine/src/math/difficulty.rs)
+- Reward curve and scarcity tail: [`onchain/programs/blockmine/src/math/rewards.rs`](onchain/programs/blockmine/src/math/rewards.rs)
+- Global config state: [`onchain/programs/blockmine/src/state/protocol_config.rs`](onchain/programs/blockmine/src/state/protocol_config.rs)
 - Live block state: [`onchain/programs/blockmine/src/state/current_block.rs`](onchain/programs/blockmine/src/state/current_block.rs)
 - Solved block state: [`onchain/programs/blockmine/src/state/block_history.rs`](onchain/programs/blockmine/src/state/block_history.rs)
-- Desktop miner GUI: [`miner-client/src/bin/blockmine-studio.rs`](miner-client/src/bin/blockmine-studio.rs)
-- Desktop miner runtime: [`miner-client/src/mining_service.rs`](miner-client/src/mining_service.rs)
+- Miner lifetime stats: [`onchain/programs/blockmine/src/state/miner_stats.rs`](onchain/programs/blockmine/src/state/miner_stats.rs)
+- Delegated session state: [`onchain/programs/blockmine/src/state/mining_session.rs`](onchain/programs/blockmine/src/state/mining_session.rs)
+
+#### Desktop miner
+
+- Desktop miner UI shell: [`miner-client/src/bin/blockmine-studio.rs`](miner-client/src/bin/blockmine-studio.rs)
+- Mining runtime orchestration: [`miner-client/src/mining_service.rs`](miner-client/src/mining_service.rs)
+- Mining loop: [`miner-client/src/miner_loop.rs`](miner-client/src/miner_loop.rs)
+- RPC integration: [`miner-client/src/rpc.rs`](miner-client/src/rpc.rs)
+- Submit pipeline: [`miner-client/src/submitter.rs`](miner-client/src/submitter.rs)
+- Desktop wallet lifecycle: [`miner-client/src/wallet.rs`](miner-client/src/wallet.rs)
+- Session wallet handling: [`miner-client/src/session_wallet.rs`](miner-client/src/session_wallet.rs)
+- CPU backend: [`miner-client/src/engine/cpu.rs`](miner-client/src/engine/cpu.rs)
+- GPU backend: [`miner-client/src/engine/gpu.rs`](miner-client/src/engine/gpu.rs)

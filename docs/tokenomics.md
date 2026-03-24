@@ -2,7 +2,7 @@
 
 ## Supply
 
-- token name: `BlockMine`
+- token name: `Blockmine`
 - ticker: `BLOC`
 - max supply: `21,000,000 BLOC`
 - decimals: `9`
@@ -11,37 +11,51 @@ Raw max supply used by the program:
 
 - `21,000,000 * 10^9 = 21,000,000,000,000,000`
 
+## Launch allocation
+
+| Category | Tokens | % | Description |
+| --- | ---: | ---: | --- |
+| Mining rewards | `20,000,000` | `95.24%` | Distributed through Smart Mining emissions |
+| Initial liquidity | `550,000` | `2.62%` | Initial LP reserved for launch market depth |
+| Treasury reserve | `450,000` | `2.14%` | Protocol-owned reserve inventory |
+
 ## Minting model
 
-The recommended V1 setup is:
+The intended setup is:
 
 1. create the SPL mint
-2. initialize the BlockMine protocol
-3. let the program create the reward vault ATA
-4. mint the full supply into the reward vault
-5. revoke mint authority
+2. complete supply allocation
+3. fund the reward vault with the mining allocation
+4. hold the LP allocation separately for launch
+5. hold the treasury reserve separately under treasury control
+6. revoke mint authority
+7. revoke freeze authority if one was used during setup
 
-After mint-authority revocation, no new BLOC can be minted.
+After authority revocation, no new BLOC can be minted or frozen by policy.
 
 ## Reward release
 
-- initial reward is configurable, default scaffold uses `10 BLOC`
-- rewards come from the reward vault, not from new minting after launch
-- V1 applies a fixed `1%` treasury fee to each successful block reward
-- miners receive the remaining `99%`
-- halving happens every configured interval
-- if the vault is empty, no more rewards can be paid
+- rewards come from the reward vault, not from future minting
+- the protocol mining schedule covers only the `20,000,000 BLOC` mining allocation
+- era progression is keyed to settled blocks mined, so stale rotation does not burn scheduled emissions
+- the protocol applies a fixed `1%` BLOC treasury fee on accepted rewards
+- accepted block submissions also route a flat `0.01 SOL` treasury fee
+- miners receive the remaining net block reward
 
-## Why all supply starts in the vault
+## Treasury mandate
 
-This keeps the monetary model simple:
+The treasury reserve is balance-sheet inventory, not a fake spreadsheet of pre-claimed spend categories.
 
-- fixed supply from day one
-- emission is controlled by the program logic, not future mint calls
-- the reward vault becomes the visible emission source
+The intended capital policy is:
 
-## Treasury
+- buyback-first
+- selective deployment into listings, infrastructure, liquidity, and growth only when justified
+- public disclosure of balances and treasury movements on the Transparency page
 
-V1 leaves room for a future treasury address in config, but keeps it inactive.
+The important design point is not a marketing promise about spending buckets.
 
-That is deliberate. Emission and miner fairness come first. Treasury mechanics can be added later if governance requires them.
+The important design point is:
+
+- fixed disclosed reserve inventory
+- live treasury fee inflows
+- public transparency around balances and treasury actions

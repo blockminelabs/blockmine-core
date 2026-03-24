@@ -1,20 +1,20 @@
 # Mining Curve
 
-This file describes the exact mining curve that is about to be deployed and used for the protocol reset.
+This file describes the exact mining curve intended for the protocol and the operational rules around it.
 
 ## Supply split
 
 - Total BLOC minted at launch: `21,000,000`
 - Reserved for protocol mining emissions: `20,000,000`
-- Reserved for LP at launch: `1,000,000`
+- Reserved for initial liquidity: `550,000`
+- Reserved for treasury reserve: `450,000`
 
 Important:
 
 - The smart contract emission schedule covers only the `20,000,000` allocated to mining.
-- The `1,000,000` LP allocation is outside the mining schedule.
+- The LP allocation and treasury reserve are outside the mining schedule.
 
 ## Era schedule
-
 
 | Era | Name        | Block range               | Reward per block (BLOC) | Era emissions (BLOC) | Cumulative emissions (BLOC) |
 | --- | ----------- | ------------------------- | ----------------------- | -------------------- | --------------------------- |
@@ -34,7 +34,6 @@ Important:
 | 13  | Eternal II  | `12,000,000 - 15,999,999` | `0.3`                   | `1,200,000`          | `19,030,000`                |
 | 14  | Scarcity    | starts at `16,000,000`    | nominally `0.15`        | remaining `970,000`  | `20,000,000`                |
 
-
 ## Exact Scarcity tail
 
 The last era needs special handling.
@@ -51,29 +50,33 @@ That means:
 
 - Scarcity full-reward blocks: `16,000,000 - 22,466,665`
 - Scarcity final partial block: `22,466,666`
-- Reward after block `22,466,666`: `0`
+- reward after block `22,466,666`: `0`
 
 This is what makes the mining schedule stop exactly at:
 
 - `20,000,000 BLOC` emitted by the protocol
 
-## Reset behavior
+## Emission indexing
 
-When we reset the protocol, the intended state is:
+- Reward selection advances on `total_blocks_mined`, not on raw open-block numbers.
+- Stale rotations preserve the scheduled reward path instead of silently skipping emissions.
+- Era transitions therefore happen on accepted settlements, not on expired timers.
 
-- current block goes back to `0`
-- current era goes back to `Genesis`
-- reward goes back to `21.0 BLOC`
-- the new era schedule becomes the canonical reward logic
-- the stale-block logic, treasury routing, and current SMART MINING flow remain active
+## Devnet reset behavior
+
+For devnet-only admin resets:
+
+- the protocol reopens at a fresh block number instead of rewinding to block `0`
+- this avoids `BlockHistory` PDA collisions with already-solved historical blocks
+
+For mainnet posture:
+
+- the protocol should launch once from Genesis
+- the admin surface should then be removed
 
 ## Treasury behavior
 
-The treasury address remains:
-
-- `3rkoTVYgnLK98GbTgZf2EV3C1eUNBVWqMd2LJ5E78mry`
-
-And it receives:
+The treasury receives:
 
 - `1%` of each BLOC block reward
 - the flat `0.01 SOL` submit fee on accepted block submissions
@@ -82,7 +85,7 @@ And it receives:
 
 The intended live protocol rhythm remains:
 
-- target block time: `10 seconds average`
+- target block time: `15 seconds average`
 - difficulty updates on solved blocks
 - stale rotation available after `60 seconds`
 
@@ -93,6 +96,6 @@ This is not a classic infinite-tail emission model.
 It is a capped mining emission model:
 
 - `20M` are emitted through mining
-- `1M` is reserved for LP at launch
-- after the capped Scarcity tail is exhausted, the protocol can keep the block machine alive, but mining rewards should be `0`
-
+- `550k` is reserved for launch LP
+- `450k` is held as treasury reserve
+- after the capped Scarcity tail is exhausted, mining rewards are `0`
