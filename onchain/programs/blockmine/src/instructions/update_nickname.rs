@@ -31,4 +31,3 @@ pub fn handler(ctx: Context<UpdateNickname>, args: UpdateNicknameArgs) -> Result
 
     Ok(())
 }
-

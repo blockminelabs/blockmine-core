@@ -118,8 +118,14 @@ pub fn update_difficulty_params_handler(
         ctx.accounts.config.admin,
         ErrorCode::Unauthorized
     );
-    require!(args.target_block_time_sec > 0, ErrorCode::InvalidAdjustmentInterval);
-    require!(args.adjustment_interval > 0, ErrorCode::InvalidAdjustmentInterval);
+    require!(
+        args.target_block_time_sec > 0,
+        ErrorCode::InvalidAdjustmentInterval
+    );
+    require!(
+        args.adjustment_interval > 0,
+        ErrorCode::InvalidAdjustmentInterval
+    );
     require!(
         args.min_difficulty_bits <= args.difficulty_bits
             && args.difficulty_bits <= args.max_difficulty_bits,
@@ -189,6 +195,10 @@ pub fn update_treasury_accounts_handler(ctx: Context<UpdateTreasuryAccounts>) ->
         ctx.accounts.config.admin,
         ErrorCode::Unauthorized
     );
+    require!(
+        ctx.accounts.treasury_vault.key() != ctx.accounts.config.reward_vault,
+        ErrorCode::InvalidTreasuryConfiguration
+    );
 
     let config = &mut ctx.accounts.config;
     config.treasury_authority = ctx.accounts.treasury_authority.key();
@@ -212,6 +222,10 @@ pub fn reset_protocol_handler(ctx: Context<ResetProtocol>) -> Result<()> {
     let config = &mut ctx.accounts.config;
     let current_block = &mut ctx.accounts.current_block;
     let genesis_era = reward_era_for_block(0);
+    let reset_block_number = config
+        .current_block_number
+        .checked_add(1)
+        .ok_or(ErrorCode::MathOverflow)?;
     let genesis_challenge = hashv(&[
         b"blockmine-reset",
         ctx.accounts.admin.key().as_ref(),
@@ -221,17 +235,17 @@ pub fn reset_protocol_handler(ctx: Context<ResetProtocol>) -> Result<()> {
     ])
     .to_bytes();
 
-    config.current_block_number = 0;
+    config.current_block_number = reset_block_number;
     config.max_supply = TOTAL_PROTOCOL_EMISSIONS;
     config.total_blocks_mined = 0;
     config.total_rewards_distributed = 0;
     config.total_treasury_fees_distributed = 0;
     config.initial_block_reward = genesis_era.reward;
     config.last_adjustment_timestamp = clock.unix_timestamp;
-    config.last_adjustment_block = 0;
+    config.last_adjustment_block = reset_block_number;
     config.paused = false;
 
-    current_block.block_number = 0;
+    current_block.block_number = reset_block_number;
     current_block.challenge = genesis_challenge;
     current_block.difficulty_bits = config.difficulty_bits;
     current_block.status = crate::constants::BLOCK_STATUS_OPEN;

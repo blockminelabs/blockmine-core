@@ -7,9 +7,7 @@ use crate::constants::{
 };
 use crate::errors::ErrorCode;
 use crate::events::MiningSessionAuthorized;
-use crate::state::{
-    BlockHistory, CurrentBlock, MinerStats, MiningSession, ProtocolConfig,
-};
+use crate::state::{BlockHistory, CurrentBlock, MinerStats, MiningSession, ProtocolConfig};
 
 use super::submit_solution::{process_submission, SubmitSolutionArgs};
 

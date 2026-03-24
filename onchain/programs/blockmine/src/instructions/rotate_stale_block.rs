@@ -5,7 +5,7 @@ use crate::constants::{BLOCK_STATUS_OPEN, CONFIG_SEED, CURRENT_BLOCK_SEED};
 use crate::errors::ErrorCode;
 use crate::events::{BlockOpened, BlockStaleRotated, DifficultyAdjusted};
 use crate::math::difficulty::target_from_difficulty_bits;
-use crate::math::rewards::reward_era_for_block;
+use crate::math::rewards::reward_era_for_open_block;
 use crate::state::{CurrentBlock, ProtocolConfig};
 
 use super::submit_solution::next_expiry;
@@ -26,12 +26,26 @@ pub fn handler(ctx: Context<RotateStaleBlock>) -> Result<()> {
     let current_block = &mut ctx.accounts.current_block;
 
     require!(!config.paused, ErrorCode::ProtocolPaused);
-    require!(current_block.status == BLOCK_STATUS_OPEN, ErrorCode::BlockClosed);
-    require!(config.block_ttl_sec > 0, ErrorCode::StaleBlockRecoveryDisabled);
-    require!(current_block.expires_at > 0, ErrorCode::StaleBlockRecoveryDisabled);
+    require!(
+        current_block.status == BLOCK_STATUS_OPEN,
+        ErrorCode::BlockClosed
+    );
+    require!(
+        config.block_ttl_sec > 0,
+        ErrorCode::StaleBlockRecoveryDisabled
+    );
+    require!(
+        current_block.expires_at > 0,
+        ErrorCode::StaleBlockRecoveryDisabled
+    );
     require!(
         clock.unix_timestamp > current_block.expires_at,
         ErrorCode::BlockNotStale
+    );
+    let expected_open_reward = reward_era_for_open_block(config.total_blocks_mined);
+    require!(
+        current_block.block_reward == expected_open_reward.reward,
+        ErrorCode::InvalidCurrentRewardState
     );
 
     let stale_block_number = current_block.block_number;
@@ -41,7 +55,8 @@ pub fn handler(ctx: Context<RotateStaleBlock>) -> Result<()> {
     let previous_bits = config.difficulty_bits;
     let next_bits = config.min_difficulty_bits;
     let next_target = target_from_difficulty_bits(next_bits);
-    let next_era = reward_era_for_block(next_block_number);
+    let next_era = reward_era_for_open_block(config.total_blocks_mined);
+    require!(next_era.reward > 0, ErrorCode::NoRewardsRemaining);
     let stale_for_seconds = (clock.unix_timestamp - current_block.opened_at).max(0) as u64;
     let next_challenge = hashv(&[
         b"blockmine-stale-rotate",

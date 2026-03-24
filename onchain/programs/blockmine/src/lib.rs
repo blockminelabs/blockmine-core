@@ -26,17 +26,11 @@ pub mod blockmine_program {
         register_miner::handler(ctx, args)
     }
 
-    pub fn update_nickname(
-        ctx: Context<UpdateNickname>,
-        args: UpdateNicknameArgs,
-    ) -> Result<()> {
+    pub fn update_nickname(ctx: Context<UpdateNickname>, args: UpdateNicknameArgs) -> Result<()> {
         update_nickname::handler(ctx, args)
     }
 
-    pub fn submit_solution(
-        ctx: Context<SubmitSolution>,
-        args: SubmitSolutionArgs,
-    ) -> Result<()> {
+    pub fn submit_solution(ctx: Context<SubmitSolution>, args: SubmitSolutionArgs) -> Result<()> {
         submit_solution::handler(ctx, args)
     }
 

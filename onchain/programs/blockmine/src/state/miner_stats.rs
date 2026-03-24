@@ -16,4 +16,3 @@ pub struct MinerStats {
     pub bump: u8,
     pub _padding0: [u8; 7],
 }
-

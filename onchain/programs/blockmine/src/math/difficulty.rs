@@ -153,8 +153,7 @@ pub fn calculate_next_difficulty(
         clamped_observed = clamped_observed.min((expected.saturating_mul(35) / 100).max(1));
     }
 
-    let ratio_bps = ((clamped_observed
-        .saturating_mul(TARGET_SCALE_DENOMINATOR_BPS as u128))
+    let ratio_bps = ((clamped_observed.saturating_mul(TARGET_SCALE_DENOMINATOR_BPS as u128))
         / expected)
         .clamp(1, u32::MAX as u128) as u32;
     let min_target = target_from_difficulty_bits(max_bits);

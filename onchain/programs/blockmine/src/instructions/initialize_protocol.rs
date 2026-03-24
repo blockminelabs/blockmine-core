@@ -69,7 +69,10 @@ pub struct InitializeProtocol<'info> {
 
 pub fn handler(ctx: Context<InitializeProtocol>, args: InitializeProtocolArgs) -> Result<()> {
     require!(args.halving_interval > 0, ErrorCode::InvalidHalvingInterval);
-    require!(args.adjustment_interval > 0, ErrorCode::InvalidAdjustmentInterval);
+    require!(
+        args.adjustment_interval > 0,
+        ErrorCode::InvalidAdjustmentInterval
+    );
     require!(args.treasury_fee_bps == 100, ErrorCode::InvalidTreasuryFee);
     require!(
         args.submit_fee_lamports == FIXED_SUBMIT_FEE_LAMPORTS,
@@ -84,6 +87,26 @@ pub fn handler(ctx: Context<InitializeProtocol>, args: InitializeProtocolArgs) -
     let clock = Clock::get()?;
     let target = target_from_difficulty_bits(args.initial_difficulty_bits);
     let initial_era = reward_era_for_block(0);
+    require!(
+        args.max_supply == TOTAL_PROTOCOL_EMISSIONS,
+        ErrorCode::InvalidMaxSupply
+    );
+    require!(
+        args.initial_block_reward == initial_era.reward,
+        ErrorCode::InvalidInitialReward
+    );
+    require!(
+        ctx.accounts.bloc_mint.decimals == args.token_decimals,
+        ErrorCode::InvalidTokenDecimals
+    );
+    require!(
+        ctx.accounts.reward_vault.amount == TOTAL_PROTOCOL_EMISSIONS,
+        ErrorCode::InvalidRewardVaultFunding
+    );
+    require!(
+        ctx.accounts.reward_vault.key() != ctx.accounts.treasury_vault.key(),
+        ErrorCode::InvalidTreasuryConfiguration
+    );
     let challenge = hashv(&[
         b"blockmine-genesis",
         ctx.accounts.admin.key().as_ref(),
@@ -116,7 +139,7 @@ pub fn handler(ctx: Context<InitializeProtocol>, args: InitializeProtocolArgs) -
     config.difficulty_bits = args.initial_difficulty_bits;
     config.min_difficulty_bits = args.min_difficulty_bits;
     config.max_difficulty_bits = args.max_difficulty_bits;
-    config.token_decimals = args.token_decimals;
+    config.token_decimals = ctx.accounts.bloc_mint.decimals;
     config.paused = false;
     config.vault_authority_bump = ctx.bumps.vault_authority;
     config.config_bump = ctx.bumps.config;

@@ -10,7 +10,7 @@ use crate::constants::{
 use crate::errors::ErrorCode;
 use crate::events::{BlockOpened, BlockSolved, DifficultyAdjusted};
 use crate::math::difficulty::{calculate_next_difficulty, hash_meets_target};
-use crate::math::rewards::reward_era_for_block;
+use crate::math::rewards::reward_era_for_open_block;
 use crate::state::{BlockHistory, CurrentBlock, MinerStats, ProtocolConfig};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
@@ -114,7 +114,10 @@ pub(crate) fn process_submission<'info>(
     let clock = Clock::get()?;
 
     require!(!config.paused, ErrorCode::ProtocolPaused);
-    require!(current_block.status == BLOCK_STATUS_OPEN, ErrorCode::BlockClosed);
+    require!(
+        current_block.status == BLOCK_STATUS_OPEN,
+        ErrorCode::BlockClosed
+    );
     if current_block.expires_at > 0 {
         require!(
             clock.unix_timestamp <= current_block.expires_at,
@@ -127,11 +130,18 @@ pub(crate) fn process_submission<'info>(
     let current_reward = current_block.block_reward;
     let current_target = current_block.difficulty_target;
     let current_bits = current_block.difficulty_bits;
-    let current_era = reward_era_for_block(block_number);
+    let current_era = reward_era_for_open_block(config.total_blocks_mined);
+    require!(
+        current_reward == current_era.reward,
+        ErrorCode::InvalidCurrentRewardState
+    );
 
     let hash = hashv(&[&current_challenge, miner.as_ref(), &nonce.to_le_bytes()]).to_bytes();
 
-    require!(hash_meets_target(&hash, &current_target), ErrorCode::InvalidSolution);
+    require!(
+        hash_meets_target(&hash, &current_target),
+        ErrorCode::InvalidSolution
+    );
     require!(current_reward > 0, ErrorCode::NoRewardsRemaining);
     require!(
         reward_vault.amount >= current_reward,
@@ -167,7 +177,11 @@ pub(crate) fn process_submission<'info>(
         authority: vault_authority.to_account_info(),
     };
     token::transfer_checked(
-        CpiContext::new_with_signer(token_program.to_account_info(), cpi_accounts, &[vault_signer]),
+        CpiContext::new_with_signer(
+            token_program.to_account_info(),
+            cpi_accounts,
+            &[vault_signer],
+        ),
         miner_reward,
         config.token_decimals,
     )?;
@@ -236,10 +250,11 @@ pub(crate) fn process_submission<'info>(
         solved_at: clock.unix_timestamp,
     });
 
-    config.total_blocks_mined = config
+    let solved_blocks_after = config
         .total_blocks_mined
         .checked_add(1)
         .ok_or(ErrorCode::MathOverflow)?;
+    config.total_blocks_mined = solved_blocks_after;
     config.total_rewards_distributed = config
         .total_rewards_distributed
         .checked_add(current_reward)
@@ -275,7 +290,7 @@ pub(crate) fn process_submission<'info>(
         });
     }
 
-    let next_era = reward_era_for_block(next_block_number);
+    let next_era = reward_era_for_open_block(solved_blocks_after);
     let next_reward = next_era.reward;
     let next_challenge = hashv(&[
         b"blockmine-next",
@@ -289,30 +304,38 @@ pub(crate) fn process_submission<'info>(
     ])
     .to_bytes();
 
+    config.current_block_number = next_block_number;
     current_block.block_number = next_block_number;
-    current_block.challenge = next_challenge;
     current_block.difficulty_bits = config.difficulty_bits;
-    current_block.status = BLOCK_STATUS_OPEN;
     current_block.difficulty_target = config.difficulty_target;
-    current_block.block_reward = next_reward;
-    current_block.opened_at = clock.unix_timestamp;
-    current_block.expires_at = next_expiry(clock.unix_timestamp, config.block_ttl_sec)?;
     current_block.winner = Pubkey::default();
     current_block.winning_nonce = 0;
     current_block.winning_hash = [0u8; 32];
     current_block.solved_at = 0;
 
-    config.current_block_number = next_block_number;
+    if next_reward > 0 {
+        current_block.challenge = next_challenge;
+        current_block.status = BLOCK_STATUS_OPEN;
+        current_block.block_reward = next_reward;
+        current_block.opened_at = clock.unix_timestamp;
+        current_block.expires_at = next_expiry(clock.unix_timestamp, config.block_ttl_sec)?;
 
-    emit!(BlockOpened {
-        block_number: current_block.block_number,
-        challenge: current_block.challenge,
-        difficulty_bits: current_block.difficulty_bits,
-        era_index: next_era.index,
-        era_name: next_era.name,
-        reward: current_block.block_reward,
-        opened_at: current_block.opened_at,
-    });
+        emit!(BlockOpened {
+            block_number: current_block.block_number,
+            challenge: current_block.challenge,
+            difficulty_bits: current_block.difficulty_bits,
+            era_index: next_era.index,
+            era_name: next_era.name,
+            reward: current_block.block_reward,
+            opened_at: current_block.opened_at,
+        });
+    } else {
+        current_block.challenge = [0u8; 32];
+        current_block.status = BLOCK_STATUS_CLOSED;
+        current_block.block_reward = 0;
+        current_block.opened_at = clock.unix_timestamp;
+        current_block.expires_at = 0;
+    }
 
     Ok(())
 }

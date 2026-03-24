@@ -48,4 +48,3 @@ pub fn handler(ctx: Context<RegisterMiner>, args: RegisterMinerArgs) -> Result<(
 
     Ok(())
 }
-

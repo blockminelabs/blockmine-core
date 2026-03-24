@@ -16,10 +16,22 @@ pub enum ErrorCode {
     InvalidSolution,
     #[msg("The provided reward vault does not match the configured vault.")]
     InvalidRewardVault,
+    #[msg("The reward vault funding does not match the fixed protocol emissions.")]
+    InvalidRewardVaultFunding,
     #[msg("The provided treasury vault does not match the configured treasury vault.")]
     InvalidTreasuryVault,
+    #[msg("Reward vault and treasury vault must be different accounts.")]
+    InvalidTreasuryConfiguration,
     #[msg("The provided mint does not match the configured BLOC mint.")]
     InvalidMint,
+    #[msg("The configured max supply does not match the fixed protocol emissions.")]
+    InvalidMaxSupply,
+    #[msg("The provided initial reward does not match the protocol schedule.")]
+    InvalidInitialReward,
+    #[msg("The configured token decimals do not match the mint decimals.")]
+    InvalidTokenDecimals,
+    #[msg("The current block reward is out of sync with the protocol schedule.")]
+    InvalidCurrentRewardState,
     #[msg("The configured difficulty range is invalid.")]
     InvalidDifficulty,
     #[msg("Difficulty adjustment interval must be greater than zero.")]

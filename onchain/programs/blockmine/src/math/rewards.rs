@@ -177,12 +177,25 @@ pub fn reward_for_block(block_number: u64) -> u64 {
     reward_era_for_block(block_number).reward
 }
 
+pub fn reward_era_for_open_block(total_blocks_mined: u64) -> RewardEra {
+    reward_era_for_block(total_blocks_mined)
+}
+
+pub fn reward_era_after_successful_settlement(total_blocks_mined: u64) -> Option<RewardEra> {
+    total_blocks_mined
+        .checked_add(1)
+        .map(reward_era_for_open_block)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn trim_name(name: [u8; ERA_NAME_LEN]) -> String {
-        let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+        let end = name
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(name.len());
         String::from_utf8(name[..end].to_vec()).unwrap()
     }
 
@@ -226,5 +239,31 @@ mod tests {
             + SCARCITY_FINAL_PARTIAL_REWARD as u128;
 
         assert_eq!(emitted, TOTAL_PROTOCOL_EMISSIONS as u128);
+    }
+
+    #[test]
+    fn stale_rotation_keeps_same_reward_until_a_block_is_mined() {
+        let current = reward_era_for_open_block(9_999);
+        let reopened_after_stale = reward_era_for_open_block(9_999);
+        let next_after_settlement =
+            reward_era_after_successful_settlement(9_999).expect("next reward");
+
+        assert_eq!(trim_name(current.name), "Genesis");
+        assert_eq!(current.reward, 21_000_000_000);
+        assert_eq!(current, reopened_after_stale);
+        assert_eq!(trim_name(next_after_settlement.name), "Aurum");
+        assert_eq!(next_after_settlement.reward, 12_000_000_000);
+    }
+
+    #[test]
+    fn rewards_end_cleanly_after_the_final_partial_block() {
+        let final_paid_block = reward_era_for_open_block(22_466_666);
+        let exhausted =
+            reward_era_after_successful_settlement(22_466_666).expect("terminal reward state");
+
+        assert_eq!(trim_name(final_paid_block.name), "Scarcity");
+        assert_eq!(final_paid_block.reward, 100_000_000);
+        assert_eq!(trim_name(exhausted.name), "Scarcity");
+        assert_eq!(exhausted.reward, 0);
     }
 }
