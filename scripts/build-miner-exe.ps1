@@ -8,7 +8,7 @@ $rootWslPath = "/mnt/$driveLetter$($rootWsl.Substring(2))"
 $wslScript = "$rootWslPath/miner-client/scripts/wsl-build-windows.sh"
 $exeSource = Join-Path $root "miner-client\target\$targetTriple\release\blockmine-studio.exe"
 $distDir = Join-Path $root "dist"
-$exeTarget = Join-Path $distDir "miner.exe"
+$exeTarget = Join-Path $distDir "Blockmine Miner.exe"
 $launcherTarget = Join-Path $distDir "start-blockmine-studio.bat"
 $readmeSource = Join-Path $root "scripts\README-miner-exe.txt"
 $readmeTarget = Join-Path $distDir "README-blockmine-studio.txt"
@@ -28,6 +28,6 @@ Copy-Item -Path $readmeSource -Destination $readmeTarget -Force
 @'
 @echo off
 cd /d %~dp0
-start "" "%~dp0miner.exe"
+start "" "%~dp0Blockmine Miner.exe"
 '@ | Set-Content -Path $launcherTarget -NoNewline
 Write-Host "Created $exeTarget"

@@ -7,7 +7,7 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-miner-exe.ps1
 ```
 
 Artifacts end up in:
-- `dist/miner.exe`
+- `dist/Blockmine Miner.exe`
 - `dist/start-blockmine-studio.bat`
 - `dist/README-blockmine-studio.txt`
 
