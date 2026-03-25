@@ -1,10 +1,11 @@
-use anyhow::{Context, Result};
 use anchor_lang::{InstructionData, ToAccountMetas};
+use anyhow::{Context, Result};
 use blockmine_program::instruction::{
-    InitializeProtocol, RegisterMiner, RotateStaleBlock, SubmitSolution,
-    SubmitSolutionWithSession,
+    InitializeProtocol, RegisterMiner, RotateStaleBlock, SubmitSolution, SubmitSolutionWithSession,
 };
-use blockmine_program::instructions::{InitializeProtocolArgs, RegisterMinerArgs, SubmitSolutionArgs};
+use blockmine_program::instructions::{
+    InitializeProtocolArgs, RegisterMinerArgs, SubmitSolutionArgs,
+};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::{
@@ -14,8 +15,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use spl_associated_token_account::{
-    get_associated_token_address,
-    instruction::create_associated_token_account_idempotent,
+    get_associated_token_address, instruction::create_associated_token_account_idempotent,
 };
 
 use crate::rpc::RpcFacade;
@@ -63,17 +63,16 @@ pub fn submit_solution(rpc: &RpcFacade, signer: &Keypair, nonce: u64) -> Result<
     let protocol_config = rpc.fetch_protocol_config()?;
     let current_block = rpc.fetch_current_block()?;
     let block_history_pda = solana_sdk::pubkey::Pubkey::find_program_address(
-        &[blockmine_program::constants::BLOCK_HISTORY_SEED, &current_block.block_number.to_le_bytes()],
+        &[
+            blockmine_program::constants::BLOCK_HISTORY_SEED,
+            &current_block.block_number.to_le_bytes(),
+        ],
         &rpc.program_id,
     )
     .0;
-    let miner_token_account = ensure_associated_token_account(
-        rpc,
-        signer,
-        signer.pubkey(),
-        protocol_config.bloc_mint,
-    )
-    .context("failed to create or load miner ATA")?;
+    let miner_token_account =
+        ensure_associated_token_account(rpc, signer, signer.pubkey(), protocol_config.bloc_mint)
+            .context("failed to create or load miner ATA")?;
 
     let accounts = blockmine_program::accounts::SubmitSolution {
         miner: signer.pubkey(),
@@ -93,7 +92,10 @@ pub fn submit_solution(rpc: &RpcFacade, signer: &Keypair, nonce: u64) -> Result<
     let instruction = Instruction {
         program_id: rpc.program_id,
         accounts: accounts.to_account_metas(None),
-        data: SubmitSolution { args: SubmitSolutionArgs { nonce } }.data(),
+        data: SubmitSolution {
+            args: SubmitSolutionArgs { nonce },
+        }
+        .data(),
     };
 
     send_instruction(rpc, signer, instruction).context("submit_solution transaction failed")
@@ -113,17 +115,16 @@ pub fn submit_solution_with_session(
     let protocol_config = rpc.fetch_protocol_config()?;
     let current_block = rpc.fetch_current_block()?;
     let block_history_pda = solana_sdk::pubkey::Pubkey::find_program_address(
-        &[blockmine_program::constants::BLOCK_HISTORY_SEED, &current_block.block_number.to_le_bytes()],
+        &[
+            blockmine_program::constants::BLOCK_HISTORY_SEED,
+            &current_block.block_number.to_le_bytes(),
+        ],
         &rpc.program_id,
     )
     .0;
-    let miner_token_account = ensure_associated_token_account(
-        rpc,
-        delegate_signer,
-        miner,
-        protocol_config.bloc_mint,
-    )
-    .context("failed to create or load miner ATA for session submit")?;
+    let miner_token_account =
+        ensure_associated_token_account(rpc, delegate_signer, miner, protocol_config.bloc_mint)
+            .context("failed to create or load miner ATA for session submit")?;
 
     let accounts = blockmine_program::accounts::SubmitSolutionWithSession {
         delegate: delegate_signer.pubkey(),
@@ -191,7 +192,11 @@ pub fn rotate_stale_block(rpc: &RpcFacade, signer: &Keypair) -> Result<Signature
     send_instruction(rpc, signer, instruction).context("rotate_stale_block transaction failed")
 }
 
-fn send_instruction(rpc: &RpcFacade, signer: &Keypair, instruction: Instruction) -> Result<Signature> {
+fn send_instruction(
+    rpc: &RpcFacade,
+    signer: &Keypair,
+    instruction: Instruction,
+) -> Result<Signature> {
     send_instructions(rpc, signer, vec![instruction])
 }
 
@@ -254,12 +259,8 @@ fn ensure_associated_token_account(
         return Ok(ata);
     }
 
-    let instruction = create_associated_token_account_idempotent(
-        &signer.pubkey(),
-        &owner,
-        &mint,
-        &spl_token::ID,
-    );
+    let instruction =
+        create_associated_token_account_idempotent(&signer.pubkey(), &owner, &mint, &spl_token::ID);
     send_instructions(rpc, signer, vec![instruction])
         .with_context(|| format!("failed to create ATA {} for owner {}", ata, owner))?;
 

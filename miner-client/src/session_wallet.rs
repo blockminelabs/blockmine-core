@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use anchor_lang::AccountDeserialize;
+use anyhow::{Context, Result};
 use blockmine_program::{constants::CONFIG_SEED, state::ProtocolConfig};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -13,8 +13,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use spl_associated_token_account::{
-    get_associated_token_address,
-    instruction::create_associated_token_account_idempotent,
+    get_associated_token_address, instruction::create_associated_token_account_idempotent,
 };
 use spl_token::instruction::transfer_checked;
 
@@ -92,7 +91,10 @@ pub fn sweep_all_session_delegate_wallets(
     sweep_wallets_with_client(&client, program_id, &wallets, recipient, u64::MAX, 0)
 }
 
-pub fn load_session_delegate_balances(rpc_url: &str, program_id: Pubkey) -> Result<SessionBalanceSummary> {
+pub fn load_session_delegate_balances(
+    rpc_url: &str,
+    program_id: Pubkey,
+) -> Result<SessionBalanceSummary> {
     let wallets = list_session_delegate_wallets()?;
     let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
     let protocol_config = fetch_protocol_config(&client, program_id)?;
@@ -109,7 +111,8 @@ pub fn load_session_delegate_balances(rpc_url: &str, program_id: Pubkey) -> Resu
         let balance_lamports = client
             .get_balance(&wallet_pubkey)
             .with_context(|| format!("failed to fetch balance for {wallet_pubkey}"))?;
-        let bloc_token_account = get_associated_token_address(&wallet_pubkey, &protocol_config.bloc_mint);
+        let bloc_token_account =
+            get_associated_token_address(&wallet_pubkey, &protocol_config.bloc_mint);
         let bloc_balance_raw = client
             .get_token_account_balance(&bloc_token_account)
             .ok()
@@ -190,9 +193,9 @@ fn sweep_wallet_with_client(
     protocol_config: &ProtocolConfig,
 ) -> Result<SessionSweepResult> {
     let fallback_pubkey = wallet.pubkey.parse::<Pubkey>().unwrap_or_default();
-    let keypair = match read_keypair_file(&wallet.keypair_path)
-        .map_err(|error| anyhow::anyhow!("failed to read {}: {error}", wallet.keypair_path.display()))
-    {
+    let keypair = match read_keypair_file(&wallet.keypair_path).map_err(|error| {
+        anyhow::anyhow!("failed to read {}: {error}", wallet.keypair_path.display())
+    }) {
         Ok(keypair) => keypair,
         Err(error) => {
             return Ok(SessionSweepResult {
@@ -275,7 +278,8 @@ fn sweep_wallet_with_client(
     };
 
     let recipient_bloc_ata = get_associated_token_address(&recipient, &protocol_config.bloc_mint);
-    let recipient_needs_bloc_ata = requested_bloc_raw > 0 && client.get_account(&recipient_bloc_ata).is_err();
+    let recipient_needs_bloc_ata =
+        requested_bloc_raw > 0 && client.get_account(&recipient_bloc_ata).is_err();
     let ata_rent_lamports = if recipient_needs_bloc_ata {
         client
             .get_minimum_balance_for_rent_exemption(spl_token::state::Account::LEN)
@@ -308,7 +312,9 @@ fn sweep_wallet_with_client(
             sent_lamports: 0,
             sent_bloc_raw: 0,
             signature: None,
-            skipped_reason: Some("requested BLOC amount exceeds the desktop wallet balance".to_string()),
+            skipped_reason: Some(
+                "requested BLOC amount exceeds the desktop wallet balance".to_string(),
+            ),
         });
     }
 
@@ -395,7 +401,9 @@ fn sweep_wallet_with_client(
             sent_lamports: 0,
             sent_bloc_raw: 0,
             signature: None,
-            skipped_reason: Some("not enough SOL to cover network fees for this withdrawal".to_string()),
+            skipped_reason: Some(
+                "not enough SOL to cover network fees for this withdrawal".to_string(),
+            ),
         });
     }
 

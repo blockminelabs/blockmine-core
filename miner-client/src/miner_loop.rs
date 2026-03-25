@@ -6,7 +6,9 @@ use anyhow::Result;
 
 use crate::engine::cpu::CpuMiner;
 use crate::engine::gpu::GpuMiner;
-use crate::engine::{BackendKind, BackendMode, BenchmarkReport, FoundSolution, MiningEngine, SearchInput};
+use crate::engine::{
+    BackendKind, BackendMode, BenchmarkReport, FoundSolution, MiningEngine, SearchInput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GpuDeviceSelection {

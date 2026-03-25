@@ -4,11 +4,14 @@ use clap::{Parser, Subcommand};
 
 use crate::engine::BackendMode;
 
-const DEFAULT_PROGRAM_ID: &str = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw";
+const DEFAULT_PROGRAM_ID: &str = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE";
 const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
 
 #[derive(Debug, Parser)]
-#[command(name = "blockmine-miner", about = "Open-source CPU/GPU miner for BlockMine")]
+#[command(
+    name = "blockmine-miner",
+    about = "Open-source CPU/GPU miner for BlockMine"
+)]
 pub struct Cli {
     #[arg(long, default_value = DEFAULT_RPC_URL)]
     pub rpc: String,
@@ -50,7 +53,7 @@ pub enum Commands {
         #[arg(long, default_value_t = 60)]
         block_ttl_sec: i64,
         #[arg(long, default_value_t = 9)]
-        token_decimals: u8
+        token_decimals: u8,
     },
     Mine {
         #[arg(long, value_enum, default_value_t = BackendMode::Cpu)]

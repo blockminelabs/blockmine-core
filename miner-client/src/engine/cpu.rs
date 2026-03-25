@@ -1,7 +1,6 @@
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc,
-    Arc,
+    mpsc, Arc,
 };
 use std::thread;
 use std::time::{Duration, Instant};
@@ -10,7 +9,9 @@ use anyhow::Result;
 use rand::Rng;
 
 use crate::engine::{BackendKind, BenchmarkReport, FoundSolution, MiningEngine, SearchInput};
-use crate::hashing::{build_solution_payload, compute_solution_hash_from_payload, hash_meets_target};
+use crate::hashing::{
+    build_solution_payload, compute_solution_hash_from_payload, hash_meets_target,
+};
 
 #[derive(Debug, Clone)]
 pub struct CpuMiner {
@@ -198,7 +199,10 @@ fn logical_core_count() -> usize {
         .unwrap_or(1)
 }
 
-fn normalize_selected_cores(selected_cores: Option<Vec<usize>>, available_cores: usize) -> Option<Vec<usize>> {
+fn normalize_selected_cores(
+    selected_cores: Option<Vec<usize>>,
+    available_cores: usize,
+) -> Option<Vec<usize>> {
     let mut cores = selected_cores?;
     cores.retain(|core| *core < available_cores);
     cores.sort_unstable();

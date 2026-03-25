@@ -16,4 +16,3 @@ pub fn run(config: &CliConfig, nickname: &str) -> Result<()> {
     println!("signature={signature}");
     Ok(())
 }
-

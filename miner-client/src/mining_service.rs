@@ -38,7 +38,11 @@ const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
 const LEADERBOARD_PLATFORM_LABEL: &str = "macos";
 #[cfg(target_os = "linux")]
 const LEADERBOARD_PLATFORM_LABEL: &str = "linux";
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos"), not(target_os = "linux")))]
+#[cfg(all(
+    not(target_os = "windows"),
+    not(target_os = "macos"),
+    not(target_os = "linux")
+))]
 const LEADERBOARD_PLATFORM_LABEL: &str = "unknown";
 
 #[derive(Debug, Clone)]
@@ -204,11 +208,8 @@ impl LeaderboardReporter {
             return;
         }
 
-        let payload = build_leaderboard_heartbeat_payload(
-            self.miner_pubkey,
-            self.reporter_pubkey,
-            snapshot,
-        );
+        let payload =
+            build_leaderboard_heartbeat_payload(self.miner_pubkey, self.reporter_pubkey, snapshot);
         let message = build_leaderboard_heartbeat_message(&payload);
         let signature_hex = hex::encode(signer.sign_message(message.as_bytes()).as_ref());
         let signed_payload = LeaderboardHeartbeatPayload {
@@ -247,7 +248,14 @@ impl MiningHandle {
             .name("blockmine-gui-miner".to_string())
             .spawn(move || {
                 let mut latest_snapshot = MiningSnapshot::default();
-                let result = worker_loop(&config, signer, options, &stop_signal, &sender, &mut latest_snapshot);
+                let result = worker_loop(
+                    &config,
+                    signer,
+                    options,
+                    &stop_signal,
+                    &sender,
+                    &mut latest_snapshot,
+                );
 
                 if let Err(error) = result {
                     latest_snapshot.status = "Stopped".to_string();
@@ -328,8 +336,8 @@ fn worker_loop(
     leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
 
     while !stop_requested.load(Ordering::Relaxed) {
-        let should_refresh_block =
-            last_block_refresh_at.elapsed() >= BLOCK_REFRESH_INTERVAL || should_rotate_stale_block(&current_block);
+        let should_refresh_block = last_block_refresh_at.elapsed() >= BLOCK_REFRESH_INTERVAL
+            || should_rotate_stale_block(&current_block);
         if should_refresh_block {
             match fetch_current_block_with_retry(&rpc) {
                 Ok(block) => {
@@ -338,8 +346,10 @@ fn worker_loop(
                 }
                 Err(error) => {
                     state.snapshot.status = "Waiting for Devnet RPC".to_string();
-                    state.snapshot.last_event =
-                        format!("Retrying after RPC error: {}", first_line(&error.to_string()));
+                    state.snapshot.last_event = format!(
+                        "Retrying after RPC error: {}",
+                        first_line(&error.to_string())
+                    );
                     state.snapshot.last_error = Some(error.to_string());
                     state.emit(sender, latest_snapshot);
                     leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
@@ -369,8 +379,10 @@ fn worker_loop(
                     state.snapshot.last_signature = Some(signature.to_string());
                     state.snapshot.status =
                         format!("Recovered stale block {}", current_block.block_number);
-                    state.snapshot.last_event =
-                        format!("Opened block {} after stale rotation", latest_block.block_number);
+                    state.snapshot.last_event = format!(
+                        "Opened block {} after stale rotation",
+                        latest_block.block_number
+                    );
                     state.snapshot.last_error = None;
                 }
                 Err(error) => {
@@ -408,7 +420,11 @@ fn worker_loop(
             resolved_gpu_batch_size,
             &input,
         )?;
-        let round_hashes = outcome.reports.iter().map(|report| report.attempts).sum::<u64>();
+        let round_hashes = outcome
+            .reports
+            .iter()
+            .map(|report| report.attempts)
+            .sum::<u64>();
         let round_elapsed = outcome
             .reports
             .iter()
@@ -417,10 +433,8 @@ fn worker_loop(
             .unwrap_or_else(|| Duration::from_secs(1));
         let clean_round_hashrate_hps = clean_round_hashrate_hps(&outcome.reports);
         if let Some(clean_hashrate_hps) = clean_round_hashrate_hps {
-            stable_offchain_hashrate_hps = update_live_hashrate_window(
-                &mut offchain_hashrate_samples,
-                clean_hashrate_hps,
-            );
+            stable_offchain_hashrate_hps =
+                update_live_hashrate_window(&mut offchain_hashrate_samples, clean_hashrate_hps);
         } else if stable_offchain_hashrate_hps <= 0.0 {
             stable_offchain_hashrate_hps =
                 round_hashes as f64 / round_elapsed.as_secs_f64().max(0.000_001);
@@ -474,7 +488,9 @@ fn worker_loop(
                 continue;
             }
 
-            if latest_chain_block.expires_at > 0 && unix_timestamp_now() > latest_chain_block.expires_at {
+            if latest_chain_block.expires_at > 0
+                && unix_timestamp_now() > latest_chain_block.expires_at
+            {
                 state.snapshot.status = "Candidate expired".to_string();
                 state.snapshot.last_event = format!(
                     "Block {} expired before submission. Rotating stale block.",
@@ -495,8 +511,10 @@ fn worker_loop(
                         state.update_block(&latest_block);
                         state.snapshot.last_signature = Some(signature.to_string());
                         state.snapshot.status = format!("Recovered stale block {}", solved_block);
-                        state.snapshot.last_event =
-                            format!("Opened block {} after stale rotation", latest_block.block_number);
+                        state.snapshot.last_event = format!(
+                            "Opened block {} after stale rotation",
+                            latest_block.block_number
+                        );
                         state.snapshot.last_error = None;
                     }
                     Err(error) => {
@@ -534,10 +552,14 @@ fn worker_loop(
                         .valid_blocks_found
                         .saturating_sub(state.snapshot.wallet_blocks_mined);
 
-                    state.snapshot.session_tokens_mined =
-                        state.snapshot.session_tokens_mined.saturating_add(mined_delta);
-                    state.snapshot.session_blocks_mined =
-                        state.snapshot.session_blocks_mined.saturating_add(block_delta);
+                    state.snapshot.session_tokens_mined = state
+                        .snapshot
+                        .session_tokens_mined
+                        .saturating_add(mined_delta);
+                    state.snapshot.session_blocks_mined = state
+                        .snapshot
+                        .session_blocks_mined
+                        .saturating_add(block_delta);
                     state.snapshot.wallet_blocks_mined = latest_miner_stats.valid_blocks_found;
                     state.snapshot.wallet_tokens_mined = latest_miner_stats.total_rewards_earned;
                     state.snapshot.protocol_blocks_mined = latest_protocol.total_blocks_mined;
@@ -546,14 +568,19 @@ fn worker_loop(
                     state.update_block(&latest_block);
                     state.snapshot.last_signature = Some(signature.to_string());
                     state.snapshot.status = format!("Block {} accepted", solved_block);
-                    state.snapshot.last_event =
-                        format!("Accepted on-chain. Session reward +{} BLOC", crate::ui::format_bloc(mined_delta));
+                    state.snapshot.last_event = format!(
+                        "Accepted on-chain. Session reward +{} BLOC",
+                        crate::ui::format_bloc(mined_delta)
+                    );
                     state.snapshot.last_error = None;
                 }
                 Err(error) => {
                     let full_error = error.to_string();
-                    let friendly_error =
-                        friendly_submit_error(session_mode, &full_error, state.snapshot.current_block_number);
+                    let friendly_error = friendly_submit_error(
+                        session_mode,
+                        &full_error,
+                        state.snapshot.current_block_number,
+                    );
                     state.snapshot.status = friendly_error.status;
                     state.snapshot.last_event = friendly_error.last_event;
                     state.snapshot.last_error = None;
@@ -583,11 +610,15 @@ fn worker_loop(
     Ok(())
 }
 
-fn fetch_protocol_config_with_retry(rpc: &RpcFacade) -> Result<blockmine_program::state::ProtocolConfig> {
+fn fetch_protocol_config_with_retry(
+    rpc: &RpcFacade,
+) -> Result<blockmine_program::state::ProtocolConfig> {
     retry_rpc_call("protocol config", || rpc.fetch_protocol_config())
 }
 
-fn fetch_current_block_with_retry(rpc: &RpcFacade) -> Result<blockmine_program::state::CurrentBlock> {
+fn fetch_current_block_with_retry(
+    rpc: &RpcFacade,
+) -> Result<blockmine_program::state::CurrentBlock> {
     retry_rpc_call("current block", || rpc.fetch_current_block())
 }
 

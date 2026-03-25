@@ -1,9 +1,9 @@
 use anyhow::Result;
 
 use crate::config::CliConfig;
+use crate::rpc::RpcFacade;
 use crate::submitter;
 use crate::wallet::load_keypair;
-use crate::rpc::RpcFacade;
 
 pub fn run(config: &CliConfig, nonce: u64) -> Result<()> {
     let signer = load_keypair(config)?;
@@ -12,4 +12,3 @@ pub fn run(config: &CliConfig, nonce: u64) -> Result<()> {
     println!("signature={signature}");
     Ok(())
 }
-

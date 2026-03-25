@@ -59,4 +59,3 @@ pub trait MiningEngine: Send + Sync + 'static {
     fn search_batch(&self, input: &SearchInput) -> Result<Option<FoundSolution>>;
     fn benchmark(&self, seconds: u64) -> Result<BenchmarkReport>;
 }
-

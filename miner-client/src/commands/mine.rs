@@ -110,16 +110,21 @@ pub fn run_with_signer(config: &CliConfig, signer: Keypair, options: MineOptions
                     let latest_protocol = rpc.fetch_protocol_config()?;
                     let latest_block = rpc.fetch_current_block()?;
                     session.protocol_blocks_mined = latest_protocol.total_blocks_mined;
-                    session.protocol_treasury_fees = latest_protocol.total_treasury_fees_distributed;
+                    session.protocol_treasury_fees =
+                        latest_protocol.total_treasury_fees_distributed;
                     session.update_block(&latest_block);
                     session.last_signature = Some(signature.to_string());
-                    session.status = format!("Recovered stale block {}", current_block.block_number);
-                    session.last_event =
-                        format!("Opened block {} after stale rotation", latest_block.block_number);
+                    session.status =
+                        format!("Recovered stale block {}", current_block.block_number);
+                    session.last_event = format!(
+                        "Opened block {} after stale rotation",
+                        latest_block.block_number
+                    );
                 }
                 Err(error) => {
                     session.status = "Stale-block rotation raced".to_string();
-                    session.last_event = format!("Rotate error: {}", first_line(&error.to_string()));
+                    session.last_event =
+                        format!("Rotate error: {}", first_line(&error.to_string()));
                 }
             }
 
@@ -146,7 +151,11 @@ pub fn run_with_signer(config: &CliConfig, signer: Keypair, options: MineOptions
             resolved_gpu_batch_size,
             &input,
         )?;
-        let round_hashes = outcome.reports.iter().map(|report| report.attempts).sum::<u64>();
+        let round_hashes = outcome
+            .reports
+            .iter()
+            .map(|report| report.attempts)
+            .sum::<u64>();
         let round_elapsed = outcome
             .reports
             .iter()
@@ -200,7 +209,8 @@ pub fn run_with_signer(config: &CliConfig, signer: Keypair, options: MineOptions
                     session.wallet_blocks_mined = latest_miner_stats.valid_blocks_found;
                     session.wallet_tokens_mined = latest_miner_stats.total_rewards_earned;
                     session.protocol_blocks_mined = latest_protocol.total_blocks_mined;
-                    session.protocol_treasury_fees = latest_protocol.total_treasury_fees_distributed;
+                    session.protocol_treasury_fees =
+                        latest_protocol.total_treasury_fees_distributed;
                     session.update_block(&latest_block);
                     session.last_signature = Some(signature.to_string());
                     session.status = format!("Block {} accepted", solved_block);
@@ -211,7 +221,8 @@ pub fn run_with_signer(config: &CliConfig, signer: Keypair, options: MineOptions
                 }
                 Err(error) => {
                     session.status = "Submission failed".to_string();
-                    session.last_event = format!("Submit error: {}", first_line(&error.to_string()));
+                    session.last_event =
+                        format!("Submit error: {}", first_line(&error.to_string()));
                 }
             }
 
@@ -236,7 +247,10 @@ pub fn run_with_signer(config: &CliConfig, signer: Keypair, options: MineOptions
         "Session BLOC mined   : {}",
         format_bloc(session.session_tokens_mined)
     );
-    println!("Last tx              : {}", session.last_signature.unwrap_or_else(|| "-".to_string()));
+    println!(
+        "Last tx              : {}",
+        session.last_signature.unwrap_or_else(|| "-".to_string())
+    );
     Ok(())
 }
 

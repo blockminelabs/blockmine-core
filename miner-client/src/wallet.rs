@@ -1,4 +1,7 @@
-use std::{env, path::{Path, PathBuf}};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
 use solana_sdk::signature::{read_keypair_file, Keypair};

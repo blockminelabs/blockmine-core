@@ -79,17 +79,26 @@ impl MineUi {
             Print(format!("Runtime           : {}\n", runtime)),
             Print(format!("Wallet            : {}\n", snapshot.wallet)),
             Print(format!("BLOC ATA          : {}\n", snapshot.bloc_ata)),
-            Print(format!("Current block     : {}\n", snapshot.current_block_number)),
+            Print(format!(
+                "Current block     : {}\n",
+                snapshot.current_block_number
+            )),
             Print(format!(
                 "Reward            : {} BLOC\n",
                 format_bloc(snapshot.current_reward)
             )),
-            Print(format!("Difficulty bits   : {}\n", snapshot.difficulty_bits)),
+            Print(format!(
+                "Difficulty bits   : {}\n",
+                snapshot.difficulty_bits
+            )),
             Print(format!(
                 "Challenge         : 0x{}\n",
                 shorten_hex(&snapshot.challenge)
             )),
-            Print(format!("Target            : 0x{}\n\n", shorten_hex(&snapshot.target))),
+            Print(format!(
+                "Target            : 0x{}\n\n",
+                shorten_hex(&snapshot.target)
+            )),
             Print(format!(
                 "Session blocks    : {}\n",
                 snapshot.session_blocks_mined
@@ -102,7 +111,10 @@ impl MineUi {
                 "Session hashes    : {}\n",
                 format_u64(snapshot.session_hashes)
             )),
-            Print(format!("Last hashrate     : {}\n\n", snapshot.last_hashrate)),
+            Print(format!(
+                "Last hashrate     : {}\n\n",
+                snapshot.last_hashrate
+            )),
             Print(format!(
                 "Wallet blocks     : {}\n",
                 snapshot.wallet_blocks_mined
@@ -123,7 +135,10 @@ impl MineUi {
         )?;
 
         if let Some(nonce) = snapshot.last_nonce {
-            queue!(self.stdout, Print(format!("Last nonce        : {}\n", nonce)))?;
+            queue!(
+                self.stdout,
+                Print(format!("Last nonce        : {}\n", nonce))
+            )?;
         }
         if let Some(hash) = snapshot.last_hash {
             queue!(

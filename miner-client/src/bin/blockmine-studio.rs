@@ -41,7 +41,7 @@ use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use sysinfo::System;
 
 const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
-const DEFAULT_PROGRAM_ID: &str = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw";
+const DEFAULT_PROGRAM_ID: &str = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE";
 const DEFAULT_BROWSER_MINE_URL: &str = "https://blockmine.dev/desktop-bridge";
 const TREASURY_FEE_PER_BLOCK_LAMPORTS: u64 = 10_000_000;
 const CHART_POINT_COUNT: usize = 34;

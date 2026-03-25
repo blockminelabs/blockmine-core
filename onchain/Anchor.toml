@@ -3,10 +3,10 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-blockmine = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw"
+blockmine = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE"
 
 [programs.devnet]
-blockmine = "HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw"
+blockmine = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE"
 
 [registry]
 url = "https://api.apr.dev"

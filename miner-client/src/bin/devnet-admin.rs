@@ -257,8 +257,12 @@ fn upgrade_program(
     let total_chunks = program_bytes.len().div_ceil(chunk_size);
     for (index, chunk) in program_bytes.chunks(chunk_size).enumerate() {
         let offset = (index * chunk_size) as u32;
-        let instruction =
-            bpf_loader_upgradeable::write(&buffer.pubkey(), &payer.pubkey(), offset, chunk.to_vec());
+        let instruction = bpf_loader_upgradeable::write(
+            &buffer.pubkey(),
+            &payer.pubkey(),
+            offset,
+            chunk.to_vec(),
+        );
         let signature = send_transaction(client, payer, vec![instruction], &[])?;
 
         if index == 0 || (index + 1) % 25 == 0 || index + 1 == total_chunks {
@@ -276,8 +280,12 @@ fn upgrade_program(
         sleep(Duration::from_millis(75));
     }
 
-    let upgrade_ix =
-        bpf_loader_upgradeable::upgrade(&program_id, &buffer.pubkey(), &payer.pubkey(), &payer.pubkey());
+    let upgrade_ix = bpf_loader_upgradeable::upgrade(
+        &program_id,
+        &buffer.pubkey(),
+        &payer.pubkey(),
+        &payer.pubkey(),
+    );
     let upgrade_signature = send_transaction(client, payer, vec![upgrade_ix], &[])?;
     println!("upgrade_sig={upgrade_signature}");
     Ok(())
@@ -410,8 +418,11 @@ fn extend_program_for_binary(
         ));
     }
 
-    let extend_ix =
-        bpf_loader_upgradeable::extend_program(&program_id, Some(&payer.pubkey()), additional_bytes);
+    let extend_ix = bpf_loader_upgradeable::extend_program(
+        &program_id,
+        Some(&payer.pubkey()),
+        additional_bytes,
+    );
     let signature = send_transaction(client, payer, vec![extend_ix], &[])?;
     println!("extend_sig={signature}");
     Ok(())
@@ -479,7 +490,10 @@ fn show_config(client: &RpcClient, program_id: Pubkey) -> Result<()> {
     println!("difficulty_bits={}", config.difficulty_bits);
     println!("min_difficulty_bits={}", config.min_difficulty_bits);
     println!("max_difficulty_bits={}", config.max_difficulty_bits);
-    println!("difficulty_target={}", hex::encode(config.difficulty_target));
+    println!(
+        "difficulty_target={}",
+        hex::encode(config.difficulty_target)
+    );
     println!("current_block_number={}", config.current_block_number);
     println!("current_block_bits={}", current_block.difficulty_bits);
     let era = reward_era_for_block(current_block.block_number);
@@ -511,7 +525,10 @@ fn reset_protocol(client: &RpcClient, payer: &Keypair, program_id: Pubkey) -> Re
 }
 
 fn decode_era_name(name: [u8; ERA_NAME_LEN]) -> String {
-    let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    let end = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
     String::from_utf8_lossy(&name[..end]).into_owned()
 }
 

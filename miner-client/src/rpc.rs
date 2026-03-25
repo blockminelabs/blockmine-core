@@ -1,13 +1,14 @@
-use anyhow::{Context, Result};
 use anchor_lang::AccountDeserialize;
+use anyhow::{Context, Result};
 use blockmine_program::{
-    constants::{CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED, MINING_SESSION_SEED, VAULT_AUTHORITY_SEED},
+    constants::{
+        CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED, MINING_SESSION_SEED,
+        VAULT_AUTHORITY_SEED,
+    },
     state::{CurrentBlock, MinerStats, MiningSession, ProtocolConfig},
 };
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    pubkey::Pubkey,
-};
+use solana_sdk::pubkey::Pubkey;
 
 use crate::config::CliConfig;
 

@@ -15,6 +15,9 @@ pub fn run(config: &CliConfig) -> Result<()> {
     println!("valid_blocks_found={}", stats.valid_blocks_found);
     println!("total_rewards_earned={}", stats.total_rewards_earned);
     println!("last_submission_time={}", stats.last_submission_time);
-    println!("nickname={}", String::from_utf8_lossy(&stats.nickname).trim_matches(char::from(0)));
+    println!(
+        "nickname={}",
+        String::from_utf8_lossy(&stats.nickname).trim_matches(char::from(0))
+    );
     Ok(())
 }

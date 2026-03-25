@@ -9,7 +9,7 @@ pub mod state;
 
 use instructions::*;
 
-declare_id!("HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw");
+declare_id!("3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE");
 
 #[program]
 pub mod blockmine_program {

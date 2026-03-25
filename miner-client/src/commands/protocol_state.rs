@@ -19,7 +19,10 @@ pub fn run(config: &CliConfig) -> Result<()> {
     println!("block_ttl_sec={}", protocol.block_ttl_sec);
     println!("current_block_number={}", protocol.current_block_number);
     println!("total_blocks_mined={}", protocol.total_blocks_mined);
-    println!("total_rewards_distributed={}", protocol.total_rewards_distributed);
+    println!(
+        "total_rewards_distributed={}",
+        protocol.total_rewards_distributed
+    );
     println!(
         "total_treasury_fees_distributed={}",
         protocol.total_treasury_fees_distributed
@@ -35,6 +38,9 @@ pub fn run(config: &CliConfig) -> Result<()> {
 }
 
 fn decode_era_name(name: [u8; ERA_NAME_LEN]) -> String {
-    let end = name.iter().position(|byte| *byte == 0).unwrap_or(name.len());
+    let end = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
     String::from_utf8_lossy(&name[..end]).into_owned()
 }

@@ -42,7 +42,11 @@ impl GpuMiner {
     }
 
     #[cfg(feature = "opencl")]
-    pub fn benchmark_with_batch_size(&self, seconds: u64, batch_size: u64) -> Result<BenchmarkReport> {
+    pub fn benchmark_with_batch_size(
+        &self,
+        seconds: u64,
+        batch_size: u64,
+    ) -> Result<BenchmarkReport> {
         run_opencl_benchmark(
             self,
             self.platform_index,
@@ -170,12 +174,18 @@ pub fn list_devices() -> Result<Vec<GpuDeviceInfo>> {
         let platform_name = platform
             .name()
             .context("failed to read OpenCL platform name")?;
-        let devices = ocl::Device::list_all(platform)
-            .with_context(|| format!("failed to enumerate OpenCL devices for platform {}", platform_index))?;
+        let devices = ocl::Device::list_all(platform).with_context(|| {
+            format!(
+                "failed to enumerate OpenCL devices for platform {}",
+                platform_index
+            )
+        })?;
 
         for (device_index, device) in devices.into_iter().enumerate() {
             let device_name = device.name().context("failed to read OpenCL device name")?;
-            let vendor = device.vendor().context("failed to read OpenCL device vendor")?;
+            let vendor = device
+                .vendor()
+                .context("failed to read OpenCL device vendor")?;
             let version = device
                 .version()
                 .context("failed to read OpenCL device version")?
@@ -321,7 +331,9 @@ fn run_opencl_search(
         .context("failed to build OpenCL kernel")?;
 
     unsafe {
-        kernel.enq().context("failed to enqueue OpenCL mining kernel")?;
+        kernel
+            .enq()
+            .context("failed to enqueue OpenCL mining kernel")?;
     }
     runtime
         .pro_que
