@@ -3391,14 +3391,43 @@ fn render_fast_mode_choice(ui: &mut egui::Ui, label: &str, hardware: &str, selec
         .rounding(rounding)
         .inner_margin(egui::Margin::same(16.0))
         .show(ui, |ui| {
-            ui.set_min_height(96.0);
-            ui.label(
-                RichText::new(label)
-                    .color(theme_accent())
-                    .strong()
-                    .size(16.0),
-            );
-            ui.add_space(8.0);
+            ui.set_min_height(162.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(label)
+                        .color(theme_accent())
+                        .strong()
+                        .size(16.0),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let pill_fill = if label.eq_ignore_ascii_case("gpu") {
+                        theme_card()
+                    } else {
+                        theme_accent_soft()
+                    };
+                    let pill_text = if label.eq_ignore_ascii_case("gpu") {
+                        theme_text()
+                    } else {
+                        theme_accent()
+                    };
+                    egui::Frame::none()
+                        .fill(pill_fill)
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .rounding(egui::Rounding::same(999.0))
+                        .inner_margin(egui::Margin::symmetric(10.0, 4.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(label)
+                                    .size(10.0)
+                                    .strong()
+                                    .color(pill_text),
+                            );
+                        });
+                });
+            });
+            ui.add_space(10.0);
+            render_hardware_architecture(ui, label);
+            ui.add_space(10.0);
             ui.label(RichText::new(hardware).color(theme_text()).size(20.0));
         });
     let click_response = ui.interact(
@@ -3408,6 +3437,148 @@ fn render_fast_mode_choice(ui: &mut egui::Ui, label: &str, hardware: &str, selec
     );
     paint_frame_glow(ui, response.response.rect, rounding);
     click_response.clicked()
+}
+
+fn render_hardware_architecture(ui: &mut egui::Ui, label: &str) {
+    let desired_height = 74.0;
+    let desired_size = egui::vec2(ui.available_width(), desired_height);
+    let (rect, _) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let cpu_mode = label.eq_ignore_ascii_case("cpu");
+    let accent = if cpu_mode {
+        theme_accent()
+    } else {
+        theme_text()
+    };
+    let accent_soft = if cpu_mode {
+        theme_accent_soft()
+    } else {
+        Color32::from_rgba_premultiplied(211, 208, 202, 70)
+    };
+    let secondary = if cpu_mode {
+        Color32::from_rgb(211, 208, 202)
+    } else {
+        theme_accent()
+    };
+    let stroke = egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 54));
+    let to_screen = |x: f32, y: f32| {
+        egui::pos2(
+            egui::lerp(rect.left()..=rect.right(), x / 200.0),
+            egui::lerp(rect.top()..=rect.bottom(), y / 100.0),
+        )
+    };
+    let time = ui.input(|input| input.time) as f32;
+    let tracks: [Vec<egui::Pos2>; 8] = [
+        vec![to_screen(10.0, 20.0), to_screen(89.5, 20.0), to_screen(94.5, 25.0), to_screen(94.5, 55.0)],
+        vec![to_screen(180.0, 10.0), to_screen(110.3, 10.0), to_screen(105.3, 15.0), to_screen(105.3, 45.0)],
+        vec![to_screen(130.0, 20.0), to_screen(130.0, 41.8), to_screen(125.0, 46.8), to_screen(115.0, 46.8)],
+        vec![to_screen(170.0, 80.0), to_screen(170.0, 58.2), to_screen(165.0, 53.2), to_screen(115.0, 53.2)],
+        vec![to_screen(135.0, 65.0), to_screen(150.0, 65.0), to_screen(155.0, 70.0), to_screen(155.0, 80.0), to_screen(150.0, 85.0), to_screen(110.2, 85.0), to_screen(105.2, 80.0), to_screen(105.2, 60.0)],
+        vec![to_screen(94.8, 95.0), to_screen(94.8, 59.0)],
+        vec![to_screen(88.0, 88.0), to_screen(88.0, 73.0), to_screen(83.0, 68.0), to_screen(73.0, 68.0), to_screen(68.0, 63.0), to_screen(68.0, 58.0), to_screen(73.0, 53.0), to_screen(87.0, 53.0)],
+        vec![to_screen(30.0, 30.0), to_screen(55.0, 30.0), to_screen(60.0, 35.0), to_screen(60.0, 41.5), to_screen(65.0, 46.5), to_screen(85.0, 46.5)],
+    ];
+
+    for track in &tracks {
+        painter.add(egui::Shape::line(track.clone(), stroke));
+    }
+
+    let chip_rect = egui::Rect::from_min_size(to_screen(85.0, 40.0), egui::vec2(rect.width() * 0.15, rect.height() * 0.20));
+    painter.rect_filled(chip_rect, egui::Rounding::same(4.0), Color32::from_rgb(17, 19, 24));
+    painter.rect_stroke(
+        chip_rect,
+        egui::Rounding::same(4.0),
+        egui::Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 22)),
+    );
+
+    let pin_specs = [
+        (93.0, 37.0, 2.5, 5.0),
+        (104.0, 37.0, 2.5, 5.0),
+        (104.0, 16.0, 2.5, 5.0),
+        (114.5, 16.0, 2.5, 5.0),
+    ];
+    for (x, y, w, h) in pin_specs {
+        painter.rect_filled(
+            egui::Rect::from_min_size(to_screen(x, y), egui::vec2(rect.width() * (w / 200.0), rect.height() * (h / 100.0))),
+            egui::Rounding::same(1.5),
+            Color32::from_rgb(79, 79, 79),
+        );
+    }
+
+    painter.text(
+        chip_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label.to_uppercase(),
+        egui::FontId::proportional(13.0),
+        accent,
+    );
+
+    for (index, track) in tracks.iter().enumerate() {
+        if track.len() < 2 {
+            continue;
+        }
+        let pulse = ((time * (0.7 + index as f32 * 0.08)).fract()).clamp(0.0, 0.999);
+        let pulse_pos = point_along_polyline(track, pulse);
+        let radius = if cpu_mode { 5.5 } else { 5.0 };
+        painter.circle_filled(pulse_pos, radius, accent.gamma_multiply(0.16));
+        painter.circle_filled(pulse_pos, radius * 0.62, if index % 2 == 0 { accent } else { secondary });
+    }
+
+    let start_nodes = [
+        to_screen(10.0, 20.0),
+        to_screen(180.0, 10.0),
+        to_screen(130.0, 20.0),
+        to_screen(170.0, 80.0),
+        to_screen(135.0, 65.0),
+        to_screen(94.8, 95.0),
+        to_screen(88.0, 88.0),
+        to_screen(30.0, 30.0),
+    ];
+    for point in start_nodes {
+        painter.circle_filled(point, 3.4, Color32::from_rgb(12, 13, 16));
+        painter.circle_stroke(point, 3.4, egui::Stroke::new(1.0, accent_soft));
+    }
+}
+
+fn point_along_polyline(points: &[egui::Pos2], t: f32) -> egui::Pos2 {
+    if points.is_empty() {
+        return egui::Pos2::ZERO;
+    }
+    if points.len() == 1 {
+        return points[0];
+    }
+
+    let mut total = 0.0;
+    let mut lengths = Vec::with_capacity(points.len().saturating_sub(1));
+    for window in points.windows(2) {
+        let length = window[0].distance(window[1]);
+        lengths.push(length);
+        total += length;
+    }
+
+    if total <= f32::EPSILON {
+        return *points.last().unwrap_or(&points[0]);
+    }
+
+    let mut target = total * t.clamp(0.0, 1.0);
+    for (index, length) in lengths.iter().enumerate() {
+        if target <= *length {
+            let start = points[index];
+            let end = points[index + 1];
+            let local_t = if *length <= f32::EPSILON {
+                0.0
+            } else {
+                target / *length
+            };
+            return egui::pos2(
+                egui::lerp(start.x..=end.x, local_t),
+                egui::lerp(start.y..=end.y, local_t),
+            );
+        }
+        target -= *length;
+    }
+
+    *points.last().unwrap_or(&points[0])
 }
 
 fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
