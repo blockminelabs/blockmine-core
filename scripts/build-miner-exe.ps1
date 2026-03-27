@@ -12,6 +12,8 @@ $exeTarget = Join-Path $distDir "Blockmine Miner.exe"
 $launcherTarget = Join-Path $distDir "start-blockmine-studio.bat"
 $readmeSource = Join-Path $root "scripts\README-miner-exe.txt"
 $readmeTarget = Join-Path $distDir "README-blockmine-studio.txt"
+$iconScript = Join-Path $root "scripts\set-exe-icon.ps1"
+$iconPath = Join-Path $root "miner-client\img\blockmine.ico"
 
 if (-not (Test-Path $distDir)) {
     New-Item -ItemType Directory -Path $distDir | Out-Null
@@ -24,6 +26,7 @@ if (-not (Test-Path $exeSource)) {
 }
 
 Copy-Item -Path $exeSource -Destination $exeTarget -Force
+& $iconScript -ExePath $exeTarget -IconPath $iconPath
 Copy-Item -Path $readmeSource -Destination $readmeTarget -Force
 @'
 @echo off
