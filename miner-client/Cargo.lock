@@ -1263,6 +1263,7 @@ dependencies = [
  "anyhow",
  "bip39",
  "blockmine-program",
+ "bs58 0.5.1",
  "clap 4.6.0",
  "crossterm",
  "ctrlc",

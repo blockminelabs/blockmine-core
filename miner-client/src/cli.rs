@@ -4,8 +4,8 @@ use clap::{Parser, Subcommand};
 
 use crate::engine::BackendMode;
 
-const DEFAULT_PROGRAM_ID: &str = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE";
-const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
+const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
+const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 
 #[derive(Debug, Parser)]
 #[command(

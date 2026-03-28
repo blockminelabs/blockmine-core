@@ -25,7 +25,8 @@ use blockmine_miner::session_wallet::{
 };
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::wallet_store::{
-    app_storage_dir, create_session_delegate_wallet, load_managed_keypair,
+    app_storage_dir, create_session_delegate_wallet, import_wallet_from_private_key,
+    import_wallet_from_seed_phrase, list_managed_wallets, load_managed_keypair,
     load_session_delegate_wallet, load_wallet_seed_phrase, ManagedWallet, WalletSource,
 };
 use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
@@ -40,8 +41,8 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use sysinfo::System;
 
-const DEFAULT_RPC_URL: &str = "https://api.devnet.solana.com";
-const DEFAULT_PROGRAM_ID: &str = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE";
+const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
+const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
 const DEFAULT_BROWSER_MINE_URL: &str = "https://blockmine.dev/desktop-bridge";
 const TREASURY_FEE_PER_BLOCK_LAMPORTS: u64 = 10_000_000;
 const CHART_POINT_COUNT: usize = 34;
@@ -272,8 +273,16 @@ enum FastMiningChoice {
     Gpu,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AddWalletMode {
+    SeedPhrase,
+    PrivateKey,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DesktopUiPreferences {
+    #[serde(default)]
+    selected_wallet_pubkey: Option<String>,
     batch_size: String,
     gpu_batch_size: String,
     cpu_threads: String,
@@ -490,6 +499,7 @@ struct BlockMineStudioApp {
     gpu_devices_error: Option<String>,
     available_cpu_cores: Vec<usize>,
     selected_cpu_cores: BTreeSet<usize>,
+    available_wallets: Vec<ManagedWallet>,
     active_wallet: Option<ManagedWallet>,
     phantom_session: Option<PhantomSessionLink>,
     pending_phantom_bridge: Option<PendingPhantomBridge>,
@@ -510,8 +520,12 @@ struct BlockMineStudioApp {
     show_era_schedule_modal: bool,
     show_seed_phrase_modal: bool,
     show_seed_phrase_warning_modal: bool,
+    show_add_wallet_modal: bool,
     deposit_method: DepositMethod,
     deposit_modal_step: DepositModalStep,
+    add_wallet_mode: AddWalletMode,
+    add_wallet_label: String,
+    add_wallet_secret: String,
     seed_phrase_words: Vec<String>,
     seed_phrase_requires_ack: bool,
     seed_phrase_acknowledged: bool,
@@ -554,10 +568,29 @@ impl BlockMineStudioApp {
             String::new()
         };
         let preferences = load_desktop_ui_preferences().ok().flatten();
+        let selected_wallet_pubkey = preferences
+            .as_ref()
+            .and_then(|prefs| prefs.selected_wallet_pubkey.clone());
         let selected_gpu_keys = preferences
             .as_ref()
             .map(|prefs| prefs.selected_gpu_keys.iter().cloned().collect())
             .unwrap_or_default();
+        let mut available_wallets = list_managed_wallets().unwrap_or_default();
+        if let Some(wallet) = desktop_wallet.as_ref() {
+            if !available_wallets.iter().any(|candidate| candidate.pubkey == wallet.pubkey) {
+                available_wallets.insert(0, wallet.clone());
+            }
+        }
+        let active_wallet = selected_wallet_pubkey
+            .as_ref()
+            .and_then(|pubkey| {
+                available_wallets
+                    .iter()
+                    .find(|wallet| wallet.pubkey == *pubkey)
+                    .cloned()
+            })
+            .or_else(|| desktop_wallet.clone())
+            .or_else(|| available_wallets.first().cloned());
 
         let mut app = Self {
             rpc_url: DEFAULT_RPC_URL.to_string(),
@@ -588,7 +621,8 @@ impl BlockMineStudioApp {
             gpu_devices_error: None,
             available_cpu_cores: detect_available_cpu_cores(),
             selected_cpu_cores: BTreeSet::new(),
-            active_wallet: desktop_wallet,
+            available_wallets,
+            active_wallet,
             phantom_session: None,
             pending_phantom_bridge: None,
             phantom_bridge_receiver: None,
@@ -608,8 +642,12 @@ impl BlockMineStudioApp {
             show_era_schedule_modal: false,
             show_seed_phrase_modal: false,
             show_seed_phrase_warning_modal: false,
+            show_add_wallet_modal: false,
             deposit_method: DepositMethod::Web3Wallet,
             deposit_modal_step: DepositModalStep::Picker,
+            add_wallet_mode: AddWalletMode::SeedPhrase,
+            add_wallet_label: String::new(),
+            add_wallet_secret: String::new(),
             seed_phrase_words: split_seed_phrase_words(&initial_seed_phrase),
             seed_phrase_requires_ack: !initial_seed_phrase.is_empty(),
             seed_phrase_acknowledged: false,
@@ -680,6 +718,13 @@ impl BlockMineStudioApp {
 
         match create_session_delegate_wallet(Some("desktop-session")) {
             Ok(wallet) => {
+                if !self
+                    .available_wallets
+                    .iter()
+                    .any(|candidate| candidate.pubkey == wallet.pubkey)
+                {
+                    self.available_wallets.insert(0, wallet.clone());
+                }
                 self.active_wallet = Some(wallet.clone());
                 if let Some(phrase) = wallet.seed_phrase.clone() {
                     self.seed_phrase_words = split_seed_phrase_words(&phrase);
@@ -854,6 +899,7 @@ impl BlockMineStudioApp {
 
     fn persist_ui_preferences(&self) {
         if let Err(error) = save_desktop_ui_preferences(&DesktopUiPreferences {
+            selected_wallet_pubkey: self.active_wallet.as_ref().map(|wallet| wallet.pubkey.clone()),
             batch_size: self.batch_size.clone(),
             gpu_batch_size: self.gpu_batch_size.clone(),
             cpu_threads: self.cpu_threads.clone(),
@@ -3586,6 +3632,8 @@ fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
         WalletSource::DedicatedGenerated => "Dedicated wallet",
         WalletSource::SessionDelegate => "Desktop wallet",
         WalletSource::ImportedFile => "Imported keypair",
+        WalletSource::ImportedSecret => "Imported private key",
+        WalletSource::ImportedSeedPhrase => "Imported seed phrase",
     }
 }
 

@@ -3,16 +3,19 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-blockmine = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE"
+blockmine = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv"
 
 [programs.devnet]
-blockmine = "3ULNnfFfLQTokEHKq5xUHMTszQL4gL8F1aHL4NYibNVE"
+blockmine = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv"
+
+[programs.mainnet]
+blockmine = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Devnet"
+cluster = "Mainnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
