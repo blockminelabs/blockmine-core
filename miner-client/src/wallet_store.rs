@@ -127,6 +127,7 @@ pub fn list_managed_wallets() -> Result<Vec<ManagedWallet>> {
     let wallet_dir = app_storage_dir()?.join("wallets");
     fs::create_dir_all(&wallet_dir)
         .with_context(|| format!("failed to create wallet directory {}", wallet_dir.display()))?;
+    migrate_legacy_session_wallet_files(&wallet_dir)?;
 
     let mut wallets = Vec::new();
     for entry in fs::read_dir(&wallet_dir)
@@ -214,6 +215,7 @@ pub fn create_session_delegate_wallet(label: Option<&str>) -> Result<ManagedWall
 
 pub fn load_session_delegate_wallet() -> Result<Option<ManagedWallet>> {
     let wallet_dir = app_storage_dir()?.join("wallets");
+    migrate_legacy_session_wallet_files(&wallet_dir)?;
     let keypair_path = wallet_dir.join(DESKTOP_SESSION_WALLET_FILENAME);
     let recovery_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_RECOVERY_FILENAME);
     let legacy_seed_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_SEED_FILENAME);
@@ -350,6 +352,29 @@ fn read_recovery_phrase_file(path: &Path) -> Result<String> {
     }
 
     Ok(raw.trim().to_string())
+}
+
+fn migrate_legacy_session_wallet_files(wallet_dir: &Path) -> Result<()> {
+    let legacy_seed_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_SEED_FILENAME);
+    let recovery_phrase_path = wallet_dir.join(DESKTOP_SESSION_WALLET_RECOVERY_FILENAME);
+
+    if legacy_seed_phrase_path.exists() && !recovery_phrase_path.exists() {
+        let phrase = read_recovery_phrase_file(&legacy_seed_phrase_path)?;
+        if !phrase.is_empty() {
+            write_recovery_phrase_file(&recovery_phrase_path, &phrase)?;
+        }
+    }
+
+    if legacy_seed_phrase_path.exists() {
+        fs::remove_file(&legacy_seed_phrase_path).with_context(|| {
+            format!(
+                "failed to remove legacy recovery phrase file {}",
+                legacy_seed_phrase_path.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn sanitize_label(input: &str) -> String {

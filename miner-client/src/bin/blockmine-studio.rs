@@ -25,8 +25,8 @@ use blockmine_miner::session_wallet::{
 };
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::wallet_store::{
-    app_storage_dir, create_session_delegate_wallet, import_wallet_from_private_key,
-    import_wallet_from_seed_phrase, list_managed_wallets, load_managed_keypair,
+    app_storage_dir, create_dedicated_wallet, create_session_delegate_wallet,
+    import_wallet_from_private_key, import_wallet_from_seed_phrase, list_managed_wallets, load_managed_keypair,
     load_session_delegate_wallet, load_wallet_seed_phrase, ManagedWallet, WalletSource,
 };
 use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
@@ -36,6 +36,7 @@ use eframe::egui::{
 use eframe::{App, Frame, NativeOptions};
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder, ImageReader};
+use qrcode::{types::Color as QrColor, QrCode};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
@@ -743,6 +744,132 @@ impl BlockMineStudioApp {
         }
     }
 
+    fn refresh_available_wallets(&mut self) {
+        let selected_pubkey = self
+            .active_wallet
+            .as_ref()
+            .map(|wallet| wallet.pubkey.clone());
+
+        let mut wallets = match list_managed_wallets() {
+            Ok(wallets) => wallets,
+            Err(error) => {
+                self.error = Some(format!("Failed to load local wallets: {error}"));
+                return;
+            }
+        };
+
+        if let Ok(Some(session_wallet)) = load_session_delegate_wallet() {
+            if !wallets
+                .iter()
+                .any(|candidate| candidate.pubkey == session_wallet.pubkey)
+            {
+                wallets.insert(0, session_wallet);
+            }
+        }
+
+        self.available_wallets = wallets;
+        self.active_wallet = selected_pubkey
+            .as_ref()
+            .and_then(|pubkey| {
+                self.available_wallets
+                    .iter()
+                    .find(|wallet| wallet.pubkey == *pubkey)
+                    .cloned()
+            })
+            .or_else(|| self.available_wallets.first().cloned());
+    }
+
+    fn select_active_wallet(&mut self, wallet: ManagedWallet) {
+        self.active_wallet = Some(wallet.clone());
+        self.seed_phrase_requires_ack = false;
+        self.seed_phrase_acknowledged = false;
+        self.persist_ui_preferences();
+        self.start_session_balance_refresh();
+        self.status = if self.mining_handle.is_some() {
+            format!(
+                "Wallet {} selected. Stop and restart mining to switch the live runtime wallet.",
+                shorten_pubkey(&wallet.pubkey)
+            )
+        } else {
+            format!("Active wallet set to {}.", shorten_pubkey(&wallet.pubkey))
+        };
+        self.error = None;
+    }
+
+    fn reset_wallet_manager_form(&mut self) {
+        self.add_wallet_label.clear();
+        self.add_wallet_secret.clear();
+        self.add_wallet_mode = AddWalletMode::SeedPhrase;
+    }
+
+    fn create_managed_wallet(&mut self) {
+        if self.mining_handle.is_some() {
+            self.error = Some("Stop mining before creating a new wallet.".to_string());
+            return;
+        }
+
+        let label = self.add_wallet_label.trim();
+        match create_dedicated_wallet((!label.is_empty()).then_some(label)) {
+            Ok(wallet) => {
+                self.refresh_available_wallets();
+                self.select_active_wallet(wallet.clone());
+                if let Ok(Some(phrase)) = load_wallet_seed_phrase(&wallet) {
+                    self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                    self.seed_phrase_requires_ack = true;
+                    self.seed_phrase_acknowledged = false;
+                    self.show_seed_phrase_modal = true;
+                    self.status = "New wallet created. Save the recovery phrase before mining."
+                        .to_string();
+                }
+                self.show_add_wallet_modal = false;
+                self.reset_wallet_manager_form();
+            }
+            Err(error) => {
+                self.error = Some(format!("Failed to create a new wallet: {error}"));
+            }
+        }
+    }
+
+    fn import_managed_wallet(&mut self) {
+        if self.mining_handle.is_some() {
+            self.error = Some("Stop mining before importing a wallet.".to_string());
+            return;
+        }
+
+        let label = self.add_wallet_label.trim();
+        let secret = self.add_wallet_secret.trim();
+        if secret.is_empty() {
+            self.error = Some("Paste a recovery phrase or private key first.".to_string());
+            return;
+        }
+
+        let result = match self.add_wallet_mode {
+            AddWalletMode::SeedPhrase => {
+                import_wallet_from_seed_phrase(secret, (!label.is_empty()).then_some(label))
+            }
+            AddWalletMode::PrivateKey => {
+                import_wallet_from_private_key(secret, (!label.is_empty()).then_some(label))
+            }
+        };
+
+        match result {
+            Ok(wallet) => {
+                self.refresh_available_wallets();
+                self.select_active_wallet(wallet.clone());
+                self.show_add_wallet_modal = false;
+                self.reset_wallet_manager_form();
+                self.status = format!(
+                    "Wallet {} imported and selected.",
+                    shorten_pubkey(&wallet.pubkey)
+                );
+                self.error = None;
+            }
+            Err(error) => {
+                self.error = Some(format!("Failed to import wallet: {error}"));
+            }
+        }
+    }
+
     fn open_seed_phrase_for_wallet(&mut self, require_ack: bool) {
         let Some(wallet) = self.active_wallet.as_ref() else {
             self.error = Some("The desktop mining wallet is not ready yet.".to_string());
@@ -1437,7 +1564,7 @@ impl App for BlockMineStudioApp {
             let modal_size = match (self.deposit_modal_step, self.deposit_method) {
                 (DepositModalStep::Picker, _) => egui::vec2(620.0, 240.0),
                 (DepositModalStep::Details, DepositMethod::Web3Wallet) => egui::vec2(620.0, 290.0),
-                (DepositModalStep::Details, DepositMethod::ManualSend) => egui::vec2(620.0, 240.0),
+                (DepositModalStep::Details, DepositMethod::ManualSend) => egui::vec2(760.0, 360.0),
             };
             egui::Window::new("Fund desktop wallet")
                 .collapsible(false)
@@ -1541,49 +1668,72 @@ impl App for BlockMineStudioApp {
                                             }
                                         });
                                     } else {
-                                        ui.label(
-                                            RichText::new(
-                                                "Copy the desktop wallet address and send SOL manually from any external Solana wallet.",
-                                            )
-                                            .color(theme_muted()),
-                                        );
-                                        ui.add_space(10.0);
-                                        ui.label(
-                                            RichText::new(wallet_address.clone())
-                                                .monospace()
-                                                .color(theme_text()),
-                                        );
-                                        ui.add_space(12.0);
-                                        ui.horizontal(|ui| {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        RichText::new("Copy wallet address")
-                                                            .color(theme_button_text()),
+                                        let qr_payload = format!("solana:{wallet_address}");
+                                        ui.horizontal_top(|ui| {
+                                            ui.vertical(|ui| {
+                                                ui.label(
+                                                    RichText::new(
+                                                        "Copy the desktop wallet address or scan the QR code to send SOL from your phone.",
                                                     )
-                                                    .fill(theme_accent())
-                                                    .min_size(egui::vec2(240.0, 42.0)),
-                                                )
-                                                .clicked()
-                                            {
-                                                ui.ctx().copy_text(wallet_address.clone());
-                                                self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
-                                                self.error = None;
-                                            }
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        RichText::new("Back")
-                                                            .color(theme_text())
-                                                            .size(14.0),
-                                                    )
-                                                    .fill(theme_card())
-                                                    .min_size(egui::vec2(240.0, 42.0)),
-                                                )
-                                                .clicked()
-                                            {
-                                                self.deposit_modal_step = DepositModalStep::Picker;
-                                            }
+                                                    .color(theme_muted()),
+                                                );
+                                                ui.add_space(10.0);
+                                                ui.label(
+                                                    RichText::new(wallet_address.clone())
+                                                        .monospace()
+                                                        .color(theme_text()),
+                                                );
+                                                ui.add_space(8.0);
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "Suggested funding: {} SOL for about {} blocks.",
+                                                        format_sol_compact(suggested_lamports),
+                                                        mined_blocks_target
+                                                    ))
+                                                    .color(theme_muted()),
+                                                );
+                                                ui.add_space(12.0);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    if ui
+                                                        .add(
+                                                            egui::Button::new(
+                                                                RichText::new("Copy wallet address")
+                                                                    .color(theme_button_text()),
+                                                            )
+                                                            .fill(theme_accent())
+                                                            .min_size(egui::vec2(240.0, 42.0)),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        ui.ctx().copy_text(wallet_address.clone());
+                                                        self.status = "Desktop wallet address copied. Send SOL to this address, then come back to the miner.".to_string();
+                                                        self.error = None;
+                                                    }
+                                                    if ui
+                                                        .add(
+                                                            egui::Button::new(
+                                                                RichText::new("Back")
+                                                                    .color(theme_text())
+                                                                    .size(14.0),
+                                                            )
+                                                            .fill(theme_card())
+                                                            .min_size(egui::vec2(180.0, 42.0)),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        self.deposit_modal_step = DepositModalStep::Picker;
+                                                    }
+                                                });
+                                            });
+                                            ui.add_space(18.0);
+                                            egui::Frame::group(ui.style())
+                                                .fill(Color32::WHITE)
+                                                .stroke(egui::Stroke::new(1.0, theme_border()))
+                                                .rounding(egui::Rounding::same(20.0))
+                                                .inner_margin(egui::Margin::same(14.0))
+                                                .show(ui, |ui| {
+                                                    render_qr_code(ui, &qr_payload, 190.0);
+                                                });
                                         });
                                     }
                                 });
@@ -1704,6 +1854,248 @@ impl App for BlockMineStudioApp {
             self.show_seed_phrase_modal = self.show_seed_phrase_modal
                 && open
                 && !(self.seed_phrase_requires_ack && self.seed_phrase_acknowledged);
+        }
+
+        if self.show_add_wallet_modal {
+            let mut open = true;
+            let mut wallet_to_select: Option<ManagedWallet> = None;
+            let mut create_wallet = false;
+            let mut import_wallet = false;
+
+            egui::Window::new("Manage wallets")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(760.0)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.label(
+                        RichText::new(
+                            "Choose which local wallet the desktop miner should use, create a fresh one, or import an existing wallet.",
+                        )
+                        .color(theme_muted()),
+                    );
+                    if self.mining_handle.is_some() {
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(
+                                "Stop mining before switching, creating, or importing wallets.",
+                            )
+                            .color(theme_accent()),
+                        );
+                    }
+
+                    ui.add_space(14.0);
+                    egui::Frame::group(ui.style())
+                        .fill(theme_card_alt())
+                        .stroke(egui::Stroke::new(1.0, theme_border()))
+                        .rounding(egui::Rounding::same(18.0))
+                        .inner_margin(egui::Margin::same(16.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new("Available wallets")
+                                    .size(13.0)
+                                    .color(theme_accent()),
+                            );
+                            ui.add_space(10.0);
+
+                            if self.available_wallets.is_empty() {
+                                ui.label(
+                                    RichText::new("No local wallets found yet. Create one below.")
+                                        .color(theme_muted()),
+                                );
+                            }
+
+                            for wallet in self.available_wallets.clone() {
+                                let selected = self
+                                    .active_wallet
+                                    .as_ref()
+                                    .map(|active| active.pubkey == wallet.pubkey)
+                                    .unwrap_or(false);
+
+                                egui::Frame::group(ui.style())
+                                    .fill(theme_card())
+                                    .stroke(egui::Stroke::new(
+                                        1.0,
+                                        if selected {
+                                            theme_accent_soft()
+                                        } else {
+                                            theme_border()
+                                        },
+                                    ))
+                                    .rounding(egui::Rounding::same(16.0))
+                                    .inner_margin(egui::Margin::same(14.0))
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.vertical(|ui| {
+                                                ui.label(
+                                                    RichText::new(format_wallet_source_label(&wallet))
+                                                        .strong()
+                                                        .color(theme_text()),
+                                                );
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    RichText::new(wallet.pubkey.clone())
+                                                        .monospace()
+                                                        .color(theme_muted()),
+                                                );
+                                            });
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(Align::Center),
+                                                |ui| {
+                                                    if selected {
+                                                        ui.label(
+                                                            RichText::new("Selected")
+                                                                .color(theme_accent())
+                                                                .strong(),
+                                                        );
+                                                    } else if ui
+                                                        .add_enabled(
+                                                            self.mining_handle.is_none(),
+                                                            egui::Button::new("Use wallet")
+                                                                .min_size(egui::vec2(108.0, 34.0)),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        wallet_to_select = Some(wallet.clone());
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    });
+                                ui.add_space(8.0);
+                            }
+                        });
+
+                    ui.add_space(14.0);
+                    ui.columns(2, |columns| {
+                        egui::Frame::group(columns[0].style())
+                            .fill(theme_card_alt())
+                            .stroke(egui::Stroke::new(1.0, theme_border()))
+                            .rounding(egui::Rounding::same(18.0))
+                            .inner_margin(egui::Margin::same(16.0))
+                            .show(&mut columns[0], |ui| {
+                                ui.label(
+                                    RichText::new("Create new")
+                                        .size(13.0)
+                                        .color(theme_accent()),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(
+                                        "Generate a fresh local wallet for this machine and store its recovery phrase.",
+                                    )
+                                    .color(theme_muted()),
+                                );
+                                ui.add_space(10.0);
+                                ui.label(RichText::new("Wallet label").color(theme_muted()));
+                                ui.add(
+                                    TextEdit::singleline(&mut self.add_wallet_label)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text("mining-rig-a"),
+                                );
+                                ui.add_space(14.0);
+                                if ui
+                                    .add_enabled(
+                                        self.mining_handle.is_none(),
+                                        egui::Button::new(
+                                            RichText::new("+  Create new")
+                                                .color(theme_button_text()),
+                                        )
+                                        .fill(theme_accent())
+                                        .min_size(egui::vec2(180.0, 40.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    create_wallet = true;
+                                }
+                            });
+
+                        egui::Frame::group(columns[1].style())
+                            .fill(theme_card_alt())
+                            .stroke(egui::Stroke::new(1.0, theme_border()))
+                            .rounding(egui::Rounding::same(18.0))
+                            .inner_margin(egui::Margin::same(16.0))
+                            .show(&mut columns[1], |ui| {
+                                ui.label(
+                                    RichText::new("Import existing")
+                                        .size(13.0)
+                                        .color(theme_accent()),
+                                );
+                                ui.add_space(8.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.selectable_value(
+                                        &mut self.add_wallet_mode,
+                                        AddWalletMode::SeedPhrase,
+                                        "Seed phrase",
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.add_wallet_mode,
+                                        AddWalletMode::PrivateKey,
+                                        "Private key",
+                                    );
+                                });
+                                ui.add_space(10.0);
+                                ui.label(RichText::new("Wallet label").color(theme_muted()));
+                                ui.add(
+                                    TextEdit::singleline(&mut self.add_wallet_label)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text("my-wallet"),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(
+                                    RichText::new(match self.add_wallet_mode {
+                                        AddWalletMode::SeedPhrase => {
+                                            "Seed phrase (12 or 24 words)"
+                                        }
+                                        AddWalletMode::PrivateKey => {
+                                            "Private key (base58 or JSON array)"
+                                        }
+                                    })
+                                    .color(theme_muted()),
+                                );
+                                ui.add(
+                                    TextEdit::multiline(&mut self.add_wallet_secret)
+                                        .desired_rows(4)
+                                        .desired_width(f32::INFINITY)
+                                        .hint_text(match self.add_wallet_mode {
+                                            AddWalletMode::SeedPhrase => {
+                                                "word1 word2 word3 ..."
+                                            }
+                                            AddWalletMode::PrivateKey => {
+                                                "[12,34,...] or base58 secret"
+                                            }
+                                        }),
+                                );
+                                ui.add_space(12.0);
+                                if ui
+                                    .add_enabled(
+                                        self.mining_handle.is_none(),
+                                        egui::Button::new(
+                                            RichText::new("Import existing")
+                                                .color(theme_button_text()),
+                                        )
+                                        .fill(theme_accent())
+                                        .min_size(egui::vec2(180.0, 40.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    import_wallet = true;
+                                }
+                            });
+                    });
+                });
+
+            self.show_add_wallet_modal = self.show_add_wallet_modal && open;
+
+            if let Some(wallet) = wallet_to_select {
+                self.select_active_wallet(wallet);
+            }
+            if create_wallet {
+                self.create_managed_wallet();
+            }
+            if import_wallet {
+                self.import_managed_wallet();
+            }
         }
 
         if self.show_withdrawal_modal {
@@ -2586,12 +2978,21 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                     {
                         app.show_seed_phrase_warning_modal = true;
                     }
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("Manage wallets").size(12.0))
+                                .min_size(egui::vec2(128.0, 26.0)),
+                        )
+                        .clicked()
+                    {
+                        app.show_add_wallet_modal = true;
+                    }
                 });
             });
             ui.add_space(10.0);
             ui.label(
                 RichText::new(
-                    "The desktop miner uses one local wallet on this machine. Keep a little SOL inside and it can keep mined blocks flowing without interruption.",
+                    "Use one local wallet at a time for the desktop miner. Manage wallets here, keep a little SOL inside, and the rig can keep mined blocks flowing without interruption.",
                 )
                 .color(theme_muted()),
             );
@@ -3625,6 +4026,53 @@ fn point_along_polyline(points: &[egui::Pos2], t: f32) -> egui::Pos2 {
     }
 
     *points.last().unwrap_or(&points[0])
+}
+
+fn render_qr_code(ui: &mut egui::Ui, payload: &str, size: f32) {
+    let Ok(code) = QrCode::new(payload.as_bytes()) else {
+        ui.label(RichText::new("QR unavailable").color(theme_muted()));
+        return;
+    };
+
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, egui::Rounding::same(16.0), Color32::WHITE);
+
+    let width = code.width() as f32;
+    let quiet_zone = 12.0;
+    let drawable = (size - quiet_zone * 2.0).max(10.0);
+    let module_size = (drawable / width).floor().max(1.0);
+    let drawn_size = module_size * width;
+    let offset_x = rect.left() + (size - drawn_size) * 0.5;
+    let offset_y = rect.top() + (size - drawn_size) * 0.5;
+
+    for y in 0..code.width() {
+        for x in 0..code.width() {
+            if code[(x, y)] != QrColor::Dark {
+                continue;
+            }
+
+            let module_rect = egui::Rect::from_min_max(
+                egui::pos2(
+                    offset_x + x as f32 * module_size,
+                    offset_y + y as f32 * module_size,
+                ),
+                egui::pos2(
+                    offset_x + (x as f32 + 1.0) * module_size,
+                    offset_y + (y as f32 + 1.0) * module_size,
+                ),
+            );
+            painter.rect_filled(module_rect, egui::Rounding::ZERO, Color32::BLACK);
+        }
+    }
+}
+
+fn shorten_pubkey(value: &str) -> String {
+    if value.len() <= 12 {
+        value.to_string()
+    } else {
+        format!("{}...{}", &value[..4], &value[value.len().saturating_sub(4)..])
+    }
 }
 
 fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
