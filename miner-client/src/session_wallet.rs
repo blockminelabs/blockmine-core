@@ -96,6 +96,22 @@ pub fn load_session_delegate_balances(
     program_id: Pubkey,
 ) -> Result<SessionBalanceSummary> {
     let wallets = list_session_delegate_wallets()?;
+    load_wallet_balances(rpc_url, program_id, &wallets)
+}
+
+pub fn load_managed_wallet_balances(
+    rpc_url: &str,
+    program_id: Pubkey,
+    wallet: &ManagedWallet,
+) -> Result<SessionBalanceSummary> {
+    load_wallet_balances(rpc_url, program_id, &[wallet.clone()])
+}
+
+fn load_wallet_balances(
+    rpc_url: &str,
+    program_id: Pubkey,
+    wallets: &[ManagedWallet],
+) -> Result<SessionBalanceSummary> {
     let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
     let protocol_config = fetch_protocol_config(&client, program_id)?;
     let mut balances = Vec::with_capacity(wallets.len());
@@ -103,7 +119,7 @@ pub fn load_session_delegate_balances(
     let mut total_bloc_balance_raw = 0u64;
     let mut funded_wallet_count = 0usize;
 
-    for wallet in &wallets {
+    for wallet in wallets {
         let wallet_pubkey = wallet
             .pubkey
             .parse::<Pubkey>()

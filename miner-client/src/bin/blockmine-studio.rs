@@ -20,7 +20,7 @@ use blockmine_miner::mining_service::{
 };
 use blockmine_miner::rpc::RpcFacade;
 use blockmine_miner::session_wallet::{
-    load_session_delegate_balances, sweep_single_session_delegate_wallet, SessionBalanceSummary,
+    load_managed_wallet_balances, sweep_single_session_delegate_wallet, SessionBalanceSummary,
     SessionSweepSummary,
 };
 use blockmine_miner::ui::format_bloc;
@@ -784,6 +784,9 @@ impl BlockMineStudioApp {
         self.seed_phrase_requires_ack = false;
         self.seed_phrase_acknowledged = false;
         self.persist_ui_preferences();
+        self.session_balance_receiver = None;
+        self.session_balance_summary = None;
+        self.last_session_balance_refresh_at = Instant::now() - Duration::from_secs(3);
         self.start_session_balance_refresh();
         self.status = if self.mining_handle.is_some() {
             format!(
@@ -972,6 +975,10 @@ impl BlockMineStudioApp {
             return;
         }
 
+        let Some(wallet) = self.active_wallet.clone() else {
+            return;
+        };
+
         let rpc_url = self.rpc_url.trim().to_string();
         let program_id = match self.program_id.trim().parse::<Pubkey>() {
             Ok(program_id) => program_id,
@@ -985,7 +992,7 @@ impl BlockMineStudioApp {
         self.last_session_balance_refresh_at = Instant::now();
 
         thread::spawn(move || {
-            let result = load_session_delegate_balances(&rpc_url, program_id)
+            let result = load_managed_wallet_balances(&rpc_url, program_id, &wallet)
                 .map_err(|error| error.to_string());
             let _ = sender.send(result);
         });
