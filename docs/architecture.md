@@ -3,82 +3,95 @@
 ## Repository layout
 
 - `onchain/`: Anchor workspace and Solana program
-- `miner-client/`: Rust desktop miner and devnet/bootstrap tooling
-- `docs/`: technical protocol notes and supporting documentation
+- `miner-client/`: Rust miner CLI and desktop client
+- `docs/`: public technical notes for the core repo
+- `packaging/`: Windows and macOS packaging helpers
 
-## Core components
+## System shape
 
-### On-chain program
+Blockmine splits mining into two layers:
 
-The Solana program owns the canonical protocol state and reward release logic. It does not mine and it does not use the GPU. It only:
+- **off-chain search**
+  - miners fetch the live block snapshot
+  - CPU and GPU hardware iterate nonces
+  - only a winning solution is sent on-chain
+- **on-chain settlement**
+  - the program stores canonical protocol state
+  - the program verifies the submitted proof
+  - the program routes rewards and fees
+  - the program opens the next logical block
+
+This keeps brute-force hashing off-chain while preserving deterministic settlement on Solana.
+
+## On-chain program
+
+The Solana program does not mine. It owns the canonical state machine:
 
 - stores protocol configuration
-- stores the current logical block
+- stores the currently open block
 - verifies `SHA256(challenge || miner_pubkey || nonce)`
-- compares the hash against a live target
+- compares the result against the live target
+- transfers miner and treasury rewards from the reward vault
+- transfers the fixed accepted-block `SOL` fee to the treasury authority
 - records solved block history
-- transfers BLOC rewards from the reward vault to the miner and treasury
-- retargets the next block difficulty
-- opens the next logical block
-- restores liveness through permissionless stale rotation
+- retargets difficulty
+- rotates stale blocks to preserve liveness
 
-The reward schedule is keyed to **successfully settled blocks**, so a stale rotation does not silently burn emissions.
+Era progression advances on **successfully settled blocks**, not on raw block openings. A stale rotation does not burn scheduled emissions.
 
-### Miner client
+## Miner client
 
-The desktop miner is a Rust application that:
+The Rust miner stack includes:
 
-- reads protocol accounts from RPC
-- searches nonces off-chain on CPU, GPU, or both
-- supports Windows and macOS desktop mining
-- submits winning nonces on-chain
-- can register miner metadata
-- can authorize delegated mining sessions
-- includes devnet/bootstrap commands while the protocol is still tuning
+- CLI mining commands for CPU, GPU, and hybrid execution
+- protocol inspection commands
+- registration and test submission flows
+- a desktop app for Windows and macOS
+- local wallet management
+- QR-assisted manual funding for the desktop wallet
 
-The engine abstraction is intentionally simple so CPU and GPU backends can share the same RPC, signing, and submission flow.
+The desktop app and the CLI use the same RPC, signing, and submission path.
 
 ## Account model
 
 ### `ProtocolConfig` PDA
 
-Single global protocol config. Stores:
+Global protocol configuration:
 
-- admin authority during devnet tuning
+- admin authority
 - BLOC mint
 - reward vault
 - treasury authority and treasury vault
-- max supply metadata
-- treasury fee configuration
-- difficulty configuration
-- live block counters
 - timing configuration
-- paused flag
+- fee configuration
+- difficulty configuration
+- aggregate counters
 
 ### `CurrentBlock` PDA
 
-Single mutable account for the open logical block. Stores:
+Mutable live block state:
 
 - block number
-- current challenge
-- current target and difficulty bits
-- reward for the current block
-- timestamps
-- status and winner metadata
+- challenge
+- target
+- difficulty bits
+- reward
+- open and expiry timestamps
+- winner metadata
 
 ### `MinerStats` PDA
 
-One PDA per miner wallet. Stores:
+One PDA per miner:
 
 - accepted submissions recorded on-chain
 - valid blocks found
 - total rewards earned
+- nickname
 - last submission time
-- nickname bytes
 
 ### `MiningSession` PDA
 
-One PDA per delegated mining session. Stores:
+Delegated session state:
 
 - canonical miner
 - delegate
@@ -88,7 +101,7 @@ One PDA per delegated mining session. Stores:
 
 ### `BlockHistory` PDA
 
-One PDA per solved block. Stores:
+One record per solved block:
 
 - block number
 - winner
@@ -96,28 +109,33 @@ One PDA per solved block. Stores:
 - nonce
 - hash
 - timestamp
-- difficulty snapshot
 - challenge snapshot
+- difficulty snapshot
 
-## Data flow
+## Token and vault flow
 
-1. Create the SPL mint.
-2. Initialize the Blockmine protocol with the canonical mint, vault, and treasury accounts.
-3. Fund the reward vault with the `20,000,000 BLOC` mining allocation.
-4. Hold the `550,000 BLOC` launch LP allocation separately.
-5. Hold the `450,000 BLOC` treasury reserve separately.
-6. Revoke mint authority after full allocation.
-7. Miners fetch challenge and target through RPC.
-8. Miners search nonces off-chain.
-9. A winner submits a solution transaction.
-10. The program verifies, pays the reward, records history, retargets difficulty, and rotates the block.
+Mainnet supply is fixed at `21,000,000 BLOC`:
 
-## Why this shape
+- `20,000,000 BLOC` in the reward vault
+- `450,000 BLOC` in the treasury vault
+- `550,000 BLOC` held separately for LP provisioning
 
-This design keeps the protocol realistic for Solana:
+The reward schedule only applies to the `20,000,000 BLOC` mining allocation.
 
-- only one mutable current-block account, so races are naturally serialized by account locks
-- immediate reward transfer, so there is no claim backlog to manage
-- fixed-supply rewards are enforced by pre-funding plus mint-authority revocation
-- difficulty uses a full 256-bit target with bounded retargeting instead of trusting client throughput claims
-- stale recovery preserves liveness without silently skipping scheduled emissions
+## Deployment posture
+
+This public repo is meant to describe the open technical core.
+
+Operational items stay outside the repo:
+
+- launch wallet bundles
+- private runbooks
+- SSH material
+- production server secrets
+
+Mainnet hardening remains a deployment concern on top of this codebase:
+
+- revoke mint authority after allocation
+- revoke freeze authority
+- remove upgrade authority
+- remove or lock down admin controls if an immutable posture is required

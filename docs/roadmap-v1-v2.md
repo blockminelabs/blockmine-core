@@ -1,32 +1,36 @@
 # Roadmap V1 -> V2
 
-## V1
+## V1 shipped
 
-- Anchor program with fixed-supply reward vault
-- Devnet token bootstrap
-- current block + history + miner stats
-- miner CLI with backend selection
-- optional OpenCL GPU miner path
-- hybrid CPU+GPU miner selection
-- live dashboard and explorer
-- basic leaderboard
-- immediate reward payout
+- Solana program with fixed-supply reward vault
+- live block challenge and on-chain settlement
+- CPU, GPU, and hybrid miner flows
+- Windows and macOS desktop client
+- local wallet manager inside the desktop miner
+- fixed `0.01 SOL` accepted-block fee
+- `1%` treasury cut in `BLOC`
+- launch LP and treasury reserve split outside the mining schedule
+
+## Near-term hardening
+
+- deployment immutability plan
+- admin surface reduction or removal
+- reproducible build and public verification flow
+- monitoring and distribution hardening for desktop binaries
 
 ## V2 candidates
 
-- GPU auto-tuning and richer device support
-- mining pools
-- commit-reveal anti-front-running flow
-- richer explorer and indexing
-- live websocket updates
-- mobile-friendly dashboard
-- miner room skins and cosmetic progression
-- Mainnet hardening and formal audits
+- richer indexer and live event surfaces
+- stronger anti-MEV or commit-reveal flow
+- deeper GPU tuning and multi-device hardening
+- pool support
+- signed desktop releases
+- richer public explorer and telemetry surfaces
 
 ## Recommended V2 order
 
-1. commit-reveal
-2. indexer and live events
-3. GPU auto-tuning and multi-device hardening
-4. pool support
-5. deeper gamification
+1. immutable deployment posture
+2. reproducible verification flow
+3. deeper indexer and event surfaces
+4. GPU tuning and multi-device hardening
+5. pool support

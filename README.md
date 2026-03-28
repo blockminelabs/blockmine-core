@@ -28,7 +28,17 @@ And it uses miner hardware for what hardware is good at:
 - high-throughput nonce iteration
 - parallel CPU and GPU execution
 
-This document is written as a **technical whitepaper-style README**. It explains the protocol, the miners, the reward curve, the fee model, the MEV story, and the main security assumptions as the system is implemented today.
+This repository is the **public technical core** for BlockMine. It covers the protocol, the miner stack, the reward curve, the fee model, and the main security assumptions as they exist in the codebase today.
+
+---
+
+## Mainnet References
+
+- Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
+- BLOC mint: `9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg`
+- Treasury authority: `8DVGdWLzDu8mXV8UuTPtqMpdST6PY2eoEAypK1fARCMb`
+
+Launch runbooks, operational wallets, SSH material, and private deployment checklists stay outside this repository.
 
 ---
 
@@ -737,18 +747,18 @@ So the contract is not a passive reward faucet. It is the deterministic state ma
 
 ---
 
-## 11. Mainnet Posture: Immutable by Design
+## 11. Mainnet Posture
 
-During tuning, the protocol can remain upgradeable and configurable on devnet.
+The deployed mainnet program and the public core repo are aligned on the following principles:
 
-But the intended mainnet posture is different:
+- fixed supply
+- pre-funded reward vault
+- fixed `0.01 SOL` accepted-block fee
+- fixed `1%` treasury cut in `BLOC`
+- deterministic per-block settlement
+- transparent treasury routing
 
-- no admin-driven policy drift
-- no mutable core rules
-- no surprise treasury rewrites
-- no reward-curve rewrites after launch
-
-The target posture for mainnet is:
+The intended end state remains:
 
 - immutable deployment
 - admin controls removed
@@ -827,57 +837,13 @@ It is a real settlement-aware mining protocol.
 
 ---
 
-## DEV NOTES (Internal)
+## 13. Security Notes
 
-This section is intentionally internal-facing.
+The public security summary for the current codebase lives in:
 
-It is not part of the public whitepaper pitch. It exists so remaining hardening work stays documented in one place before mainnet.
+- [`docs/security-notes.md`](docs/security-notes.md)
 
-### Internal threat matrix
-
-| Attack / failure mode | What it means in BlockMine | Current mitigation in V1 | Residual risk / recommended hardening |
-|---|---|---|---|
-| Nonce theft from mempool | An attacker sees a winning nonce in flight and tries to resubmit it under another wallet | The hash binds `challenge + miner_pubkey + nonce`, so copied nonces do not validate for a different miner | Good V1 mitigation, but it does not solve validator ordering or censorship |
-| Front-running / ordering MEV | A validator or privileged orderflow actor decides which winning tx gets priority | Wallet binding stops simple nonce theft | True anti-MEV still requires stricter snapshot binding, priority routing, or private relay |
-| Censorship MEV | A validator or block producer suppresses a valid solve | None at protocol level beyond retrying and open participation | Still open; private relay or more advanced submission routing reduces but does not eliminate it |
-| Copying the exact signed transaction | An observer rebroadcasts the same signed solve tx | The destination reward is still the original signer's wallet, so it does not steal funds directly | Still creates noise, ordering races, and unreliable UX |
-| Duplicate reward race | Two miners submit valid solves for the same block almost simultaneously | `current_block` is a single mutable account; Solana account locking serializes the winner path | Good mitigation, but loser UX still depends on timing and orderflow |
-| Replay across blocks | A valid solve for block `N` is reused for `N+1` | Challenge rotation makes each block unique | Well mitigated as long as challenge rotation stays intact |
-| Replay across miners | A valid solve for miner A is replayed for miner B | The miner pubkey is inside the proof | Well mitigated |
-| Reward vault drain via forged transfer | Attacker tries to move BLOC from the reward vault | Reward vault is owned by PDA `vault_authority`, and transfers require the signer PDA path | Well mitigated assuming PDA seeds remain stable |
-| Fake treasury vault substitution | Attacker passes a fake treasury token account into submit | Accounts are checked against config and mint ownership | Well mitigated |
-| Fake mint substitution | Attacker tries to trick the program into paying another mint | The mint account must equal `config.bloc_mint` | Well mitigated |
-| Wrong ATA / token sink attack | Attacker points reward to an invalid token account | The token account must be owned by the miner and match the BLOC mint | Well mitigated |
-| Block solve after expiry | An expired block is still solved and paid | `submit_solution` rejects blocks whose `expires_at` has passed | Well mitigated when TTL is enabled |
-| Stale block permanent deadlock | Difficulty gets too high, nobody solves, chain stalls forever | Permissionless `rotate_stale_block` exists when TTL is enabled | Partially mitigated; rotation works, but economics can still be improved |
-| Stale-block griefing | Attackers repeatedly let blocks go stale to degrade liveness | Anyone can rotate stale blocks and keep the chain moving | Liveness is preserved, but difficulty continuity is affected |
-| Stale-reset farming | Attackers wait for expiry to reset difficulty to minimum, then farm the easier next block | Permissionless stale rotation is open to anyone | Still open in V1 because stale rotation hard-resets to `min_difficulty_bits` |
-| Difficulty shock attack | A large farm joins, spikes difficulty, then leaves weaker miners stuck on a hard block | Per-block retarget plus stale recovery | Partially mitigated, not bulletproof |
-| Difficulty overshoot / undershoot | Difficulty reacts too hard or too softly and oscillates around the target | Full-target retarget, smoothing, outlier clamp, emergency fast-ramp | Still tuning-sensitive under major hash shocks |
-| Difficulty manipulation by fake hashrate reports | Client lies about hashrate to influence difficulty | The contract does not read miner-reported hashrate at all | Well mitigated by design |
-| Timestamp manipulation within block rules | Slight timing bias changes observed block time | The contract uses Solana clock data, not miner-reported timing | Limited residual risk from chain-side timing variance |
-| Reward exhaustion mismatch | Config says max supply X but vault holds a different amount | Payouts depend on actual reward vault balance, not only `max_supply` metadata | Operational risk remains if vault funding is wrong |
-| Underfunded reward vault | Protocol launches without enough BLOC in the vault | `InsufficientVaultBalance` / `NoRewardsRemaining` stop payouts | Operational mitigation only; launch discipline required |
-| Mint authority abuse | Operator keeps mint authority and inflates supply after launch | Recommended operational step is to revoke mint authority | Real operational risk until authority is revoked |
-| Treasury address swap | Admin changes treasury routing | Admin-only `update_treasury_accounts` exists | Governance / trust risk remains while admin exists |
-| Pause abuse | Admin freezes mining arbitrarily | `set_paused` exists for emergencies | Governance / social risk |
-| Upgrade authority abuse | Program logic is changed after launch | Program remains upgradeable during V1 tuning | Trust risk until governance or immutability is adopted |
-| Session delegate theft | Malware steals the locally stored delegate wallet | Session key is enough to submit until session constraints end | Still open; local wallet hygiene remains important |
-| Session overfunding | Too much SOL is preloaded into a delegate wallet | Desktop miner now uses a persistent local mining wallet with manual balance management | UX risk exists if users mismanage local wallet balances |
-| Session replay after user intent changes | User thinks approval ended but session remains active | Session has explicit `max_submissions`, `expires_at`, and `active` state | Explicit revoke would still improve the model |
-| Unlimited session abuse | `expires_at = 0` and `max_submissions = 0` allow effectively infinite use | This is an intentional feature | Security depends on delegate wallet hygiene and user understanding |
-| Block history state-growth attack | The protocol creates one account per solved block, increasing state and rent usage over time | Deterministic one-record-per-block history | Still open as a scaling / cost issue, not a theft bug |
-| SOL fee griefing | Attackers flood valid or near-valid submit attempts to waste their own SOL or treasury bandwidth | Fixed `0.01 SOL` accepted-block fee plus tx cost adds friction | Works as anti-spam, but does not make griefing impossible |
-| RPC deception | A malicious or unreliable RPC serves stale block state to miners | Clients re-fetch current block and retry, but RPC trust is still external | Use multiple RPCs or quorum reads in future versions |
-| Browser wallet phishing | Fake frontend tricks users into approving the wrong transaction | Wallet sees the tx and address fields, but UX can still mislead | Domain security and wallet hygiene remain critical |
-| Desktop binary tampering | User runs a modified miner that changes behavior or steals local funds | Open source and local inspection help | Signed binaries and reproducible builds would improve distribution trust |
-| Browser throttling / tab suspension | Browser mining silently slows down or stops | Not a contract issue; desktop miner avoids this | Expected limitation of browser mining |
-| CPU/GPU fairness imbalance | Custom optimized clients outperform browser users heavily | Open protocol, public algorithm | Economic tradeoff of open PoW |
-| Farm centralization | Large GPU farms dominate block wins | Difficulty responds to total network work, not fairness | Open economic reality of proof-of-work |
-| Selfish mining / delayed submit | Miner withholds a valid solve to optimize timing | No full protocol-level prevention in V1 | Commit-reveal or alternative economic design would be needed |
-| Wallet bridge callback spoofing | A malicious local process tries to fake the desktop callback | Desktop bridge uses callback token matching | Good mitigation, but localhost flow is still security-sensitive |
-| Arithmetic overflow | Counters or fee math overflow on-chain | Checked arithmetic and explicit overflow errors exist | Good mitigation |
-| Cryptographic break of SHA-256 | Hash function itself becomes weak | Not mitigated inside BlockMine | Out of scope unless the algorithm is changed |
+That file is the right place for public-facing security assumptions, launch posture, and remaining hardening notes.
 | Solana chain-level outage / congestion | Network is slow or unavailable | Clients retry, stale rotation exists, but chain dependency remains | External platform risk |
 | Cluster rollback / fork effects | Confirmed state is later rolled back | Normal Solana finality assumptions apply | External platform risk |
 

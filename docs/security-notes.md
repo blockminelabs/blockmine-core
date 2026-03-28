@@ -1,49 +1,70 @@
 # Security Notes
 
-## Main V1 protections
+## Core protections in V1
 
-- solution hash binds `challenge + miner pubkey + nonce`
-- reward vault is PDA-controlled
-- mint authority should be revoked after funding the vault
-- current block is a single mutable account, so winners are serialized by account locking
-- admin pause exists for emergencies
+- the proof binds `challenge + miner_pubkey + nonce`
+- the reward vault is owned by the program PDA
+- accepted-block `SOL` fees are routed by the contract
+- the treasury `BLOC` cut is routed by the contract
+- one mutable current-block account serializes winner settlement
+- stale rotation preserves liveness
 
-## Replay protection
+## What is strongly enforced on-chain
 
-Replay across blocks is prevented by challenge rotation. A valid nonce for block `N` should not remain valid for block `N+1`.
+### Proof ownership
 
-## Front-running
+Copying a nonce is not enough to steal a reward because the miner pubkey is part of the hashed preimage.
 
-V1 mitigation:
+### Canonical reward routing
 
-- bind the miner wallet into the hash
+The program reads:
 
-V1 limitation:
+- canonical mint
+- canonical reward vault
+- canonical treasury authority
+- canonical treasury vault
 
-- direct submit remains visible in the mempool
+from protocol config, then enforces those accounts during settlement.
 
-V2 recommendation:
+### Reward vault safety
 
-- commit-reveal flow for anti-front-running hardening
+The mining allocation sits in a PDA-controlled reward vault. Transfers from that vault require the program signer path.
 
-## Duplicate rewards
+## Important operational assumptions
 
-The reward path and block rotation happen in one instruction over the same mutable state. If two submissions race:
+The launch still depends on correct operations around:
 
-- one transaction wins the account lock and closes the block
-- the later transaction should fail because the state has already advanced
+- funding the reward vault with the full mining allocation
+- funding the treasury and LP allocations correctly
+- revoking mint authority after allocation
+- revoking freeze authority after allocation
+- deciding when to remove admin and upgrade authority
 
-## Vault safety
+These are launch and governance concerns, not automatic properties of the runtime alone.
 
-The reward vault is an ATA owned by the vault-authority PDA, so rewards require a valid PDA signer path from the program.
+## Current V1 limitations
 
-## Trust assumptions
+### Ordering and mempool visibility
 
-V1 assumes:
+Binding the miner pubkey blocks simple nonce theft, but it does not fully solve:
 
-- admin performs setup correctly
-- full supply is minted to the reward vault
-- mint authority is revoked
+- validator ordering
+- censorship
+- more advanced MEV-style routing issues
 
-Those steps are social-operational risks, not purely programmatic ones, so launch checklists matter.
+### Admin surface
 
+The codebase still contains admin instructions and an upgrade path. If a fully immutable posture is required, those controls must be removed or permanently disabled at the deployment layer.
+
+### Treasury model
+
+The `BLOC` reward vault is program-controlled. The treasury authority remains an external wallet authority, which means treasury custody is operational rather than fully contract-locked.
+
+## Recommended end-state posture
+
+- mint authority revoked
+- freeze authority revoked
+- treasury routing fixed
+- admin controls removed or locked down
+- upgrade authority removed
+- reproducible and publicly verifiable build for the deployed program

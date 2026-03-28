@@ -1,18 +1,16 @@
-# Live Config Notes
+# Mainnet References
 
-Before mainnet launch, these values must be reviewed and updated in the core repo and in the live deploy flow:
+These are the public mainnet references for the current Blockmine core deployment:
 
-- final Solana mainnet RPC
-- final mainnet program ID
-- final BLOC mint address
-- final treasury wallet address
-- final reward vault and treasury vault addresses
-- final desktop miner defaults
-- any remaining `devnet` explorer links or URLs
+- Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
+- BLOC mint: `9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg`
+- Treasury authority: `8DVGdWLzDu8mXV8UuTPtqMpdST6PY2eoEAypK1fARCMb`
+- Mainnet RPC default in the CLI: `https://api.mainnet-beta.solana.com`
 
-This repo is intended to become the public/open-source core:
+Operational items remain intentionally out of repo:
 
-- `onchain/`
-- `miner-client/`
-
-Launch secrets, wallets, SSH material, and operational runbooks should stay outside this repo.
+- launch wallets
+- private runbooks
+- SSH material
+- production server credentials
+- distribution-side secrets

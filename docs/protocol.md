@@ -1,10 +1,12 @@
-# BlockMine Protocol
+# Blockmine Protocol
 
 ## Goal
 
-BlockMine implements a Bitcoin-like block race on top of Solana. Solana is the state and settlement layer. Miners are competing for `BLOC`, not for `SOL`.
+Blockmine implements a proof-of-work block race on top of Solana.
 
-## Proof of work
+Miners compete off-chain for `BLOC`. Solana acts as the canonical state, settlement, and accounting layer.
+
+## Proof rule
 
 V1 uses:
 
@@ -14,101 +16,104 @@ Validity rule:
 
 `hash < target`
 
-## Why the miner pubkey is included
+Including the miner pubkey in the proof prevents the simplest form of nonce theft because a copied nonce will not validate for a different wallet.
 
-Binding the wallet into the hash prevents the simplest form of solution theft:
+## Block lifecycle
 
-- Miner A finds `(nonce, hash)`.
-- Miner B sees the nonce in the mempool and copies it.
-- Because Miner B has a different pubkey, the recomputed hash is different and invalid.
+1. the protocol opens one canonical logical block
+2. miners fetch the challenge, target, reward, and expiry
+3. hardware searches nonces off-chain
+4. a winner submits a valid solution
+5. the program verifies the hash and target
+6. the fixed `0.01 SOL` accepted-block fee is routed to the treasury authority
+7. the `BLOC` reward is split:
+   - `99%` to the miner
+   - `1%` to the treasury vault
+8. block history is written
+9. the next block is opened with a fresh challenge and target
 
-This does not remove every mempool concern, but it is a solid V1 mitigation without commit-reveal complexity.
+If a block expires before a valid solve arrives, anyone can rotate the stale block and keep the protocol live.
 
 ## Challenge rotation
 
-The next challenge is derived from:
+The next challenge is derived from live settlement context, including:
 
 - previous winning hash
 - previous challenge
 - winner pubkey
 - winning nonce
 - next block number
-- current slot
-- current timestamp
+- slot and timestamp data
 
-This prevents cross-block replay because the challenge changes every block.
+This prevents cross-block replay because every logical block has a new challenge.
 
 ## Difficulty
 
-V1 stores:
+The protocol stores:
 
 - `difficulty_bits`
 - `difficulty_target`
 
-The target is derived from `difficulty_bits` by forcing a prefix of zero bits and filling the remaining bytes with `0xff`.
+`difficulty_bits` is a compact display value. The actual acceptance check uses the full `256-bit` target stored on-chain.
 
-This gives a cheap on-chain model with a real target comparison, while keeping adjustment math easy to reason about and test.
+Retargeting happens on every solved block:
 
-## Difficulty adjustment
-
-The protocol now retargets on every solved block.
-
-Inputs:
-
-- expected duration = `target_block_time_sec`
+- expected duration = configured target block time
 - observed duration = `solved_at - opened_at`
+- the full target is scaled
+- extreme outliers are clamped
+- min and max bounds are enforced
 
-Rules:
-
-- smooth the observed block time toward the target before reacting
-- clamp extreme outliers so one weird block does not overreact
-- if blocks are faster than target, increase difficulty by 1-2 bits
-- if blocks are slower than target, decrease difficulty by 1-2 bits
-- clamp within configured min/max bits
-
-This keeps the system converging toward the configured average block time without using a hard timer or cooldown.
-
-## Rewards
-
-Reward per block is derived by:
-
-`initial_block_reward >> halvings`
-
-Where:
-
-- `halvings = block_number / halving_interval`
-
-This mirrors the spirit of Bitcoin while staying cheap on-chain.
+This keeps the protocol responsive to changing hashrate without trusting any client-reported throughput.
 
 ## Reward model
 
-V1 uses immediate payout:
+Blockmine does not use an infinite tail and does not use a simple binary halving schedule.
 
-- reward is split inside one instruction
-- winner receives `99%` of the scheduled block reward in their ATA
-- treasury receives `1%` of the scheduled block reward in its ATA
-- no claim instruction is required in the happy path
+Instead, V1 uses a named era schedule over the `20,000,000 BLOC` mining allocation:
 
-This is simpler than a pending-claim ledger and reduces the amount of user-facing state.
+- Genesis
+- Aurum
+- Phoenix
+- Horizon
+- Quasar
+- Pulsar
+- Voidfall
+- Eclipse
+- Mythos
+- Paragon
+- Hyperion
+- Singularity
+- Eternal I
+- Eternal II
+- Scarcity
 
-## Rejections and stats
+Era progression advances on **successfully settled blocks**. Stale rotations do not burn scheduled emissions.
 
-One implementation caveat matters:
+The final Scarcity tail is capped so the mining schedule stops exactly at `20,000,000 BLOC`.
 
-- on Solana, a failed transaction rolls back account mutations
-- because of that, V1 miner stats only persist successful winning submissions
+## Settlement guarantees
 
-If you want durable invalid-attempt telemetry, V2 should add a separate accepted-but-rejected accounting path or an indexer.
+The core V1 guarantees come from structure:
 
-## Lifecycle
+- one mutable current-block account
+- one deterministic history record per solved block
+- one reward vault owned by the program PDA
+- one canonical treasury route loaded from config
 
-1. `initialize_protocol`
-2. block `0` is opened
-3. miners read challenge and target
-4. off-chain nonce search begins
-5. a valid solution is found
-6. `submit_solution`
-7. program verifies hash and target
-8. reward is transferred
-9. block history is written
-10. next block is opened
+That means the contract is not a passive faucet. It is the state machine that defines:
+
+- who won
+- what reward was due
+- where the treasury fee went
+- what block opens next
+
+## Sessions
+
+The protocol also supports delegated mining sessions:
+
+- a canonical miner can authorize a delegate wallet
+- the delegate submits solutions on behalf of the miner
+- limits can be set through expiry and submission cap
+
+This is useful for browser-to-desktop handoff and wallet-delegated mining flows, while keeping settlement tied to the canonical miner identity.

@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 
 const fs = require("node:fs");
-const path = require("node:path");
-
 const { Keypair, PublicKey } = require("@solana/web3.js");
 const { mplTokenMetadata, createMetadataAccountV3 } = require("@metaplex-foundation/mpl-token-metadata");
 const { createUmi } = require("@metaplex-foundation/umi-bundle-defaults");
@@ -29,14 +27,16 @@ async function main() {
   const uri = process.env.BLOC_METADATA_URI;
   const name = process.env.BLOC_TOKEN_NAME ?? "Blockmine";
   const symbol = process.env.BLOC_TOKEN_SYMBOL ?? "BLOC";
-  const keypairPath =
-    process.env.BLOC_MINT_AUTHORITY_KEYPAIR ?? path.resolve(__dirname, "../../../Launch/wallets/mint-authority.json");
+  const keypairPath = process.env.BLOC_MINT_AUTHORITY_KEYPAIR;
 
   if (!mint) {
     throw new Error("BLOC_MINT_ADDRESS is required");
   }
   if (!uri) {
     throw new Error("BLOC_METADATA_URI is required");
+  }
+  if (!keypairPath) {
+    throw new Error("BLOC_MINT_AUTHORITY_KEYPAIR is required");
   }
 
   const payer = loadKeypair(keypairPath);

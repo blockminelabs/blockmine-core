@@ -1,26 +1,23 @@
-BlockMine Miner EXE
+Blockmine Miner Windows Build
 
-Files:
-- blockmine-miner.exe
-- start-miner-devnet.bat
+Current packaged binary:
+- dist/Blockmine Miner.exe
 
-Default Devnet launch:
-- double click start-miner-devnet.bat
-- il launcher chiede solo l'address pubblico del wallet e poi verifica che corrisponda al keypair locale
-- l'address incollato deve combaciare con il file keypair configurato
+Current public mainnet defaults:
+- Program ID: FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv
+- Mint: 9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg
 
-If your wallet is not in:
-- %USERPROFILE%\.config\solana\id.json
+How to rebuild:
+- powershell -ExecutionPolicy Bypass -File .\scripts\build-miner-exe.ps1
 
-you can either:
-- set SOLANA_WALLET before launch
-- or run the exe manually with --keypair
+What the packaged desktop miner includes:
+- branded executable icon
+- wallet manager
+- create/import wallet flows
+- QR-assisted manual funding
+- CPU, GPU, and hybrid mining modes
 
-Examples:
-- blockmine-miner.exe protocol-state
-- blockmine-miner.exe wallet-stats --keypair "C:\path\to\id.json"
-- blockmine-miner.exe mine --backend cpu --batch-size 500000 --keypair "C:\path\to\id.json"
-- blockmine-miner.exe mine --backend both --batch-size 250000 --gpu-batch-size 131072 --keypair "C:\path\to\id.json"
-
-Current Devnet program:
-- HQCgF9XWsJPH3uEfRdRGW1rARwWqDpV361ZpaXUostfw
+Important:
+- dist/ is a build artifact and is not meant to be committed
+- launch wallets, private keys, and runbooks do not belong in this repo
+- devnet rehearsal tooling exists elsewhere in the repo, but the packaged desktop client defaults to mainnet
