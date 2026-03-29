@@ -264,6 +264,17 @@ pub fn load_wallet_seed_phrase(wallet: &ManagedWallet) -> Result<Option<String>>
     }
 }
 
+pub fn delete_managed_wallet(wallet: &ManagedWallet) -> Result<()> {
+    let wallet_dir = app_storage_dir()?.join("wallets");
+
+    delete_wallet_file_if_local(&wallet.keypair_path, &wallet_dir)?;
+    if let Some(path) = &wallet.seed_phrase_path {
+        delete_wallet_file_if_local(path, &wallet_dir)?;
+    }
+
+    Ok(())
+}
+
 fn persist_managed_wallet(
     keypair: &Keypair,
     label: Option<&str>,
@@ -352,6 +363,30 @@ fn read_recovery_phrase_file(path: &Path) -> Result<String> {
     }
 
     Ok(raw.trim().to_string())
+}
+
+fn delete_wallet_file_if_local(path: &Path, wallet_dir: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let canonical_wallet_dir = wallet_dir
+        .canonicalize()
+        .unwrap_or_else(|_| wallet_dir.to_path_buf());
+    let canonical_path = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
+
+    if !canonical_path.starts_with(&canonical_wallet_dir) {
+        anyhow::bail!(
+            "refusing to delete non-local wallet file {}",
+            path.display()
+        );
+    }
+
+    fs::remove_file(path)
+        .with_context(|| format!("failed to remove wallet file {}", path.display()))?;
+    Ok(())
 }
 
 fn migrate_legacy_session_wallet_files(wallet_dir: &Path) -> Result<()> {

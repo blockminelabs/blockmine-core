@@ -25,9 +25,10 @@ use blockmine_miner::session_wallet::{
 };
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::wallet_store::{
-    app_storage_dir, create_dedicated_wallet, create_session_delegate_wallet,
-    import_wallet_from_private_key, import_wallet_from_seed_phrase, list_managed_wallets, load_managed_keypair,
-    load_session_delegate_wallet, load_wallet_seed_phrase, ManagedWallet, WalletSource,
+    app_storage_dir, create_dedicated_wallet, create_session_delegate_wallet, delete_managed_wallet,
+    import_wallet_from_private_key, import_wallet_from_seed_phrase, list_managed_wallets,
+    load_managed_keypair, load_session_delegate_wallet, load_wallet_seed_phrase, ManagedWallet,
+    WalletSource,
 };
 use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
 use eframe::egui::{
@@ -520,16 +521,19 @@ struct BlockMineStudioApp {
     show_withdrawal_modal: bool,
     show_era_schedule_modal: bool,
     show_seed_phrase_modal: bool,
-    show_seed_phrase_warning_modal: bool,
     show_add_wallet_modal: bool,
+    show_delete_wallet_modal: bool,
     deposit_method: DepositMethod,
     deposit_modal_step: DepositModalStep,
     add_wallet_mode: AddWalletMode,
     add_wallet_label: String,
     add_wallet_secret: String,
     seed_phrase_words: Vec<String>,
+    seed_phrase_revealed: bool,
+    seed_phrase_revealed_once: bool,
     seed_phrase_requires_ack: bool,
     seed_phrase_acknowledged: bool,
+    pending_wallet_delete: Option<ManagedWallet>,
     withdrawal_target_wallet: String,
     withdrawal_sol_amount: String,
     withdrawal_bloc_amount: String,
@@ -642,16 +646,19 @@ impl BlockMineStudioApp {
             show_withdrawal_modal: false,
             show_era_schedule_modal: false,
             show_seed_phrase_modal: false,
-            show_seed_phrase_warning_modal: false,
             show_add_wallet_modal: false,
+            show_delete_wallet_modal: false,
             deposit_method: DepositMethod::Web3Wallet,
             deposit_modal_step: DepositModalStep::Picker,
             add_wallet_mode: AddWalletMode::SeedPhrase,
             add_wallet_label: String::new(),
             add_wallet_secret: String::new(),
             seed_phrase_words: split_seed_phrase_words(&initial_seed_phrase),
+            seed_phrase_revealed: false,
+            seed_phrase_revealed_once: false,
             seed_phrase_requires_ack: !initial_seed_phrase.is_empty(),
             seed_phrase_acknowledged: false,
+            pending_wallet_delete: None,
             withdrawal_target_wallet: String::new(),
             withdrawal_sol_amount: String::new(),
             withdrawal_bloc_amount: String::new(),
@@ -818,6 +825,8 @@ impl BlockMineStudioApp {
                 self.select_active_wallet(wallet.clone());
                 if let Ok(Some(phrase)) = load_wallet_seed_phrase(&wallet) {
                     self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                    self.seed_phrase_revealed = false;
+                    self.seed_phrase_revealed_once = false;
                     self.seed_phrase_requires_ack = true;
                     self.seed_phrase_acknowledged = false;
                     self.show_seed_phrase_modal = true;
@@ -882,6 +891,8 @@ impl BlockMineStudioApp {
         match load_wallet_seed_phrase(wallet) {
             Ok(Some(phrase)) => {
                 self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                self.seed_phrase_revealed = false;
+                self.seed_phrase_revealed_once = false;
                 self.seed_phrase_requires_ack = require_ack;
                 self.seed_phrase_acknowledged = false;
                 self.show_seed_phrase_modal = true;
@@ -895,6 +906,75 @@ impl BlockMineStudioApp {
             }
             Err(error) => {
                 self.error = Some(format!("Failed to load the recovery phrase: {error}"));
+            }
+        }
+    }
+
+    fn request_wallet_delete(&mut self, wallet: ManagedWallet) {
+        if self.mining_handle.is_some() {
+            self.error = Some("Stop mining before deleting a wallet.".to_string());
+            return;
+        }
+
+        self.pending_wallet_delete = Some(wallet);
+        self.show_delete_wallet_modal = true;
+        self.error = None;
+    }
+
+    fn confirm_wallet_delete(&mut self) {
+        if self.mining_handle.is_some() {
+            self.error = Some("Stop mining before deleting a wallet.".to_string());
+            return;
+        }
+
+        let Some(wallet) = self.pending_wallet_delete.clone() else {
+            self.show_delete_wallet_modal = false;
+            return;
+        };
+
+        match delete_managed_wallet(&wallet) {
+            Ok(()) => {
+                let deleted_pubkey = wallet.pubkey.clone();
+                self.show_delete_wallet_modal = false;
+                self.pending_wallet_delete = None;
+                self.show_seed_phrase_modal = false;
+                self.seed_phrase_words.clear();
+                self.seed_phrase_revealed = false;
+                self.seed_phrase_revealed_once = false;
+                self.seed_phrase_requires_ack = false;
+                self.seed_phrase_acknowledged = false;
+                self.refresh_available_wallets();
+                self.persist_ui_preferences();
+                self.session_balance_receiver = None;
+                self.session_balance_summary = None;
+                self.last_session_balance_refresh_at = Instant::now() - Duration::from_secs(3);
+                if self.active_wallet.is_some() {
+                    self.start_session_balance_refresh();
+                }
+                if self
+                    .phantom_session
+                    .as_ref()
+                    .map(|session| session.delegate_wallet.pubkey == deleted_pubkey)
+                    .unwrap_or(false)
+                {
+                    self.phantom_session = None;
+                }
+                self.status = if let Some(active_wallet) = self.active_wallet.as_ref() {
+                    format!(
+                        "Wallet {} deleted. Active wallet is now {}.",
+                        shorten_pubkey(&deleted_pubkey),
+                        shorten_pubkey(&active_wallet.pubkey)
+                    )
+                } else {
+                    format!(
+                        "Wallet {} deleted. Create or import a wallet to keep mining.",
+                        shorten_pubkey(&deleted_pubkey)
+                    )
+                };
+                self.error = None;
+            }
+            Err(error) => {
+                self.error = Some(format!("Failed to delete wallet: {error}"));
             }
         }
     }
@@ -1543,7 +1623,12 @@ impl App for BlockMineStudioApp {
                 ui.label(RichText::new(&self.status).color(theme_text()));
                 if let Some(error) = &self.error {
                     ui.add_space(6.0);
-                    ui.colored_label(theme_error(), error);
+                    let error_color = if render_error_as_status(error) {
+                        theme_text()
+                    } else {
+                        theme_error()
+                    };
+                    ui.colored_label(error_color, error);
                 }
                 ui.add_space(10.0);
             });
@@ -1690,15 +1775,6 @@ impl App for BlockMineStudioApp {
                                                         .monospace()
                                                         .color(theme_text()),
                                                 );
-                                                ui.add_space(8.0);
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "Suggested funding: {} SOL for about {} blocks.",
-                                                        format_sol_compact(suggested_lamports),
-                                                        mined_blocks_target
-                                                    ))
-                                                    .color(theme_muted()),
-                                                );
                                                 ui.add_space(12.0);
                                                 ui.horizontal_wrapped(|ui| {
                                                     if ui
@@ -1750,39 +1826,6 @@ impl App for BlockMineStudioApp {
             self.show_deposit_modal = self.show_deposit_modal && open;
         }
 
-        if self.show_seed_phrase_warning_modal {
-            let mut open = true;
-            egui::Window::new("Recovery phrase")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(480.0)
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    ui.label(
-                        RichText::new(
-                            "Do not share these words. Anyone with the recovery phrase controls the funds in this wallet. Make sure you are not on a screen share or recording before continuing."
-                        )
-                        .color(theme_muted()),
-                    );
-                    ui.add_space(14.0);
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                RichText::new("I understand, reveal!")
-                                    .color(theme_button_text()),
-                            )
-                            .fill(theme_accent())
-                            .min_size(egui::vec2(220.0, 38.0)),
-                        )
-                        .clicked()
-                    {
-                        self.show_seed_phrase_warning_modal = false;
-                        self.open_seed_phrase_for_wallet(false);
-                    }
-                });
-            self.show_seed_phrase_warning_modal = self.show_seed_phrase_warning_modal && open;
-        }
-
         if self.show_seed_phrase_modal {
             let mut open = true;
             egui::Window::new("Recovery phrase")
@@ -1791,12 +1834,36 @@ impl App for BlockMineStudioApp {
                 .default_width(620.0)
                 .open(&mut open)
                 .show(ctx, |ui| {
-                    ui.label(
-                        RichText::new(
-                            "These 12 words recover the desktop mining wallet. Store them offline and keep them private."
-                        )
-                        .color(theme_muted()),
-                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            RichText::new(
+                                "These words recover the desktop mining wallet. Keep them offline and private."
+                            )
+                            .color(theme_muted()),
+                        );
+                        let reveal_label = if self.seed_phrase_revealed {
+                            "Hide phrase"
+                        } else {
+                            "Show phrase"
+                        };
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new(reveal_label)
+                                        .color(theme_text())
+                                        .size(13.0),
+                                )
+                                .min_size(egui::vec2(92.0, 32.0)),
+                            )
+                            .on_hover_text("Reveal or hide the recovery phrase")
+                            .clicked()
+                        {
+                            self.seed_phrase_revealed = !self.seed_phrase_revealed;
+                            if self.seed_phrase_revealed {
+                                self.seed_phrase_revealed_once = true;
+                            }
+                        }
+                    });
                     ui.add_space(12.0);
                     egui::Frame::group(ui.style())
                         .fill(theme_card_alt())
@@ -1809,8 +1876,13 @@ impl App for BlockMineStudioApp {
                                 .spacing(egui::vec2(14.0, 12.0))
                                 .show(ui, |ui| {
                                     for (index, word) in self.seed_phrase_words.iter().enumerate() {
+                                        let display_word = if self.seed_phrase_revealed {
+                                            word.clone()
+                                        } else {
+                                            "Hidden".to_string()
+                                        };
                                         ui.label(
-                                            RichText::new(format!("{:02}. {}", index + 1, word))
+                                            RichText::new(format!("{:02}. {}", index + 1, display_word))
                                                 .monospace()
                                                 .color(theme_text())
                                                 .size(18.0),
@@ -1824,13 +1896,19 @@ impl App for BlockMineStudioApp {
                     ui.add_space(12.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui
-                            .add(
+                            .add_enabled(
+                                self.seed_phrase_revealed,
                                 egui::Button::new(
                                     RichText::new("Copy phrase").color(theme_button_text()),
                                 )
                                 .fill(theme_accent())
-                                .min_size(egui::vec2(160.0, 38.0)),
+                                .min_size(egui::vec2(160.0, 38.0))
                             )
+                            .on_hover_text(if self.seed_phrase_revealed {
+                                "Copy the recovery phrase"
+                            } else {
+                                "Reveal the recovery phrase first"
+                            })
                             .clicked()
                         {
                             ui.ctx().copy_text(self.seed_phrase_words.join(" "));
@@ -1841,7 +1919,8 @@ impl App for BlockMineStudioApp {
                         }
                         if self.seed_phrase_requires_ack {
                             if ui
-                                .add(
+                                .add_enabled(
+                                    self.seed_phrase_revealed_once,
                                     egui::Button::new("I saved the recovery phrase")
                                         .min_size(egui::vec2(220.0, 38.0)),
                                 )
@@ -1863,9 +1942,60 @@ impl App for BlockMineStudioApp {
                 && !(self.seed_phrase_requires_ack && self.seed_phrase_acknowledged);
         }
 
+        if self.show_delete_wallet_modal {
+            let mut open = true;
+            egui::Window::new("Delete wallet")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(520.0)
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    let wallet_label = self
+                        .pending_wallet_delete
+                        .as_ref()
+                        .map(|wallet| wallet.pubkey.clone())
+                        .unwrap_or_else(|| "Unknown wallet".to_string());
+                    ui.label(
+                        RichText::new(
+                            "Are you sure? This action is irreversible. Without a saved recovery phrase or private key, you will not be able to recover this wallet again."
+                        )
+                        .color(theme_muted()),
+                    );
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(shorten_pubkey(&wallet_label))
+                            .color(theme_text())
+                            .strong()
+                            .monospace(),
+                    );
+                    ui.add_space(14.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    RichText::new("Delete wallet")
+                                        .color(theme_button_text()),
+                                )
+                                .fill(theme_danger_soft())
+                                .min_size(egui::vec2(160.0, 38.0)),
+                            )
+                            .clicked()
+                        {
+                            self.confirm_wallet_delete();
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.show_delete_wallet_modal = false;
+                            self.pending_wallet_delete = None;
+                        }
+                    });
+                });
+            self.show_delete_wallet_modal = self.show_delete_wallet_modal && open;
+        }
+
         if self.show_add_wallet_modal {
             let mut open = true;
             let mut wallet_to_select: Option<ManagedWallet> = None;
+            let mut wallet_to_delete: Option<ManagedWallet> = None;
             let mut create_wallet = false;
             let mut import_wallet = false;
 
@@ -1905,72 +2035,94 @@ impl App for BlockMineStudioApp {
                             );
                             ui.add_space(10.0);
 
-                            if self.available_wallets.is_empty() {
-                                ui.label(
-                                    RichText::new("No local wallets found yet. Create one below.")
-                                        .color(theme_muted()),
-                                );
-                            }
+                            egui::ScrollArea::vertical()
+                                .max_height(470.0)
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    if self.available_wallets.is_empty() {
+                                        ui.label(
+                                            RichText::new("No local wallets found yet. Create one below.")
+                                                .color(theme_muted()),
+                                        );
+                                    }
 
-                            for wallet in self.available_wallets.clone() {
-                                let selected = self
-                                    .active_wallet
-                                    .as_ref()
-                                    .map(|active| active.pubkey == wallet.pubkey)
-                                    .unwrap_or(false);
+                                    for wallet in self.available_wallets.clone() {
+                                        let selected = self
+                                            .active_wallet
+                                            .as_ref()
+                                            .map(|active| active.pubkey == wallet.pubkey)
+                                            .unwrap_or(false);
 
-                                egui::Frame::group(ui.style())
-                                    .fill(theme_card())
-                                    .stroke(egui::Stroke::new(
-                                        1.0,
-                                        if selected {
-                                            theme_accent_soft()
-                                        } else {
-                                            theme_border()
-                                        },
-                                    ))
-                                    .rounding(egui::Rounding::same(16.0))
-                                    .inner_margin(egui::Margin::same(14.0))
-                                    .show(ui, |ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.vertical(|ui| {
-                                                ui.label(
-                                                    RichText::new(format_wallet_source_label(&wallet))
-                                                        .strong()
-                                                        .color(theme_text()),
-                                                );
-                                                ui.add_space(4.0);
-                                                ui.label(
-                                                    RichText::new(wallet.pubkey.clone())
-                                                        .monospace()
-                                                        .color(theme_muted()),
-                                                );
-                                            });
-                                            ui.with_layout(
-                                                egui::Layout::right_to_left(Align::Center),
-                                                |ui| {
-                                                    if selected {
-                                                        ui.label(
-                                                            RichText::new("Selected")
-                                                                .color(theme_accent())
-                                                                .strong(),
-                                                        );
-                                                    } else if ui
-                                                        .add_enabled(
-                                                            self.mining_handle.is_none(),
-                                                            egui::Button::new("Use wallet")
-                                                                .min_size(egui::vec2(108.0, 34.0)),
-                                                        )
-                                                        .clicked()
-                                                    {
-                                                        wallet_to_select = Some(wallet.clone());
-                                                    }
+                                        egui::Frame::group(ui.style())
+                                            .fill(theme_card())
+                                            .stroke(egui::Stroke::new(
+                                                1.0,
+                                                if selected {
+                                                    theme_accent_soft()
+                                                } else {
+                                                    theme_border()
                                                 },
-                                            );
-                                        });
-                                    });
-                                ui.add_space(8.0);
-                            }
+                                            ))
+                                            .rounding(egui::Rounding::same(16.0))
+                                            .inner_margin(egui::Margin::same(14.0))
+                                            .show(ui, |ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.vertical(|ui| {
+                                                        ui.label(
+                                                            RichText::new(format_wallet_source_label(&wallet))
+                                                                .strong()
+                                                                .color(theme_text()),
+                                                        );
+                                                        ui.add_space(4.0);
+                                                        ui.label(
+                                                            RichText::new(wallet.pubkey.clone())
+                                                                .monospace()
+                                                                .color(theme_muted()),
+                                                        );
+                                                    });
+                                                    ui.with_layout(
+                                                        egui::Layout::right_to_left(Align::Center),
+                                                        |ui| {
+                                                            if ui
+                                                                .add_enabled(
+                                                                    self.mining_handle.is_none(),
+                                                                    egui::Button::new(
+                                                                        RichText::new("Delete")
+                                                                            .size(11.0)
+                                                                            .color(theme_button_text()),
+                                                                    )
+                                                                    .fill(theme_danger_soft())
+                                                                    .min_size(egui::vec2(78.0, 30.0)),
+                                                                )
+                                                                .on_hover_text("Delete this wallet from local storage")
+                                                                .clicked()
+                                                            {
+                                                                wallet_to_delete = Some(wallet.clone());
+                                                            }
+
+                                                            if selected {
+                                                                ui.label(
+                                                                    RichText::new("Selected")
+                                                                        .color(theme_accent())
+                                                                        .strong(),
+                                                                );
+                                                            } else if ui
+                                                                .add_enabled(
+                                                                    self.mining_handle.is_none(),
+                                                                    egui::Button::new("Use wallet")
+                                                                        .min_size(egui::vec2(108.0, 30.0)),
+                                                                )
+                                                                .clicked()
+                                                            {
+                                                                wallet_to_select = Some(wallet.clone());
+                                                            }
+                                                        },
+                                                    );
+                                                });
+                                            });
+                                        ui.add_space(8.0);
+                                    }
+                                });
                         });
 
                     ui.add_space(14.0);
@@ -2096,6 +2248,9 @@ impl App for BlockMineStudioApp {
 
             if let Some(wallet) = wallet_to_select {
                 self.select_active_wallet(wallet);
+            }
+            if let Some(wallet) = wallet_to_delete {
+                self.request_wallet_delete(wallet);
             }
             if create_wallet {
                 self.create_managed_wallet();
@@ -2647,6 +2802,10 @@ fn theme_accent_soft() -> Color32 {
     Color32::from_rgb(181, 110, 42)
 }
 
+fn theme_danger_soft() -> Color32 {
+    Color32::from_rgba_premultiplied(138, 46, 46, 178)
+}
+
 fn theme_glow_outer() -> Color32 {
     Color32::TRANSPARENT
 }
@@ -2926,13 +3085,20 @@ fn metric_chip(ui: &mut egui::Ui, label: &str, value: impl Into<String>) {
         .fill(theme_card_alt())
         .stroke(egui::Stroke::new(1.0, theme_border()))
         .rounding(rounding)
-        .inner_margin(egui::Margin::same(12.0))
+        .inner_margin(egui::Margin::same(10.0))
         .show(ui, |ui| {
             ui.label(RichText::new(label).size(12.0).color(theme_muted()));
-            ui.add_space(6.0);
-            ui.label(RichText::new(value.into()).size(24.0).color(theme_text()));
+            ui.add_space(4.0);
+            ui.label(RichText::new(value.into()).size(21.0).color(theme_text()));
         });
     paint_frame_glow(ui, response.response.rect, rounding);
+}
+
+fn render_error_as_status(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("stale block")
+        || normalized.contains("stale-block")
+        || normalized.contains("rotate stale block")
 }
 
 fn decode_era_name(name: [u8; ERA_NAME_LEN]) -> String {
@@ -2978,17 +3144,23 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                 ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                     if ui
                         .add(
-                            egui::Button::new(RichText::new("Recovery").size(12.0))
-                                .min_size(egui::vec2(92.0, 26.0)),
+                            egui::Button::new(
+                                RichText::new("Recovery").size(13.0).color(theme_text()),
+                            )
+                            .min_size(egui::vec2(114.0, 30.0)),
                         )
                         .clicked()
                     {
-                        app.show_seed_phrase_warning_modal = true;
+                        app.open_seed_phrase_for_wallet(false);
                     }
                     if ui
                         .add(
-                            egui::Button::new(RichText::new("Manage wallets").size(12.0))
-                                .min_size(egui::vec2(128.0, 26.0)),
+                            egui::Button::new(
+                                RichText::new("Manage wallets")
+                                    .size(13.0)
+                                    .color(theme_text()),
+                            )
+                            .min_size(egui::vec2(140.0, 30.0)),
                         )
                         .clicked()
                     {
@@ -3302,23 +3474,7 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 
 fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
     card_frame(ui, "Mining stats", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
-                RichText::new("Live desktop miner output:")
-                    .size(24.0)
-                    .color(Color32::WHITE),
-            );
-        });
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new(
-                "Real-time output from your rig. Hover the curve to inspect each 30-second peak.",
-            )
-            .color(theme_muted()),
-        );
-
-        ui.add_space(14.0);
-        ui.columns(3, |columns| {
+        ui.columns(4, |columns| {
             metric_chip(
                 &mut columns[0],
                 "Live rate",
@@ -3334,6 +3490,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
                 "Blocks mined",
                 app.latest_snapshot.session_blocks_mined.to_string(),
             );
+            metric_chip(&mut columns[3], "Runtime", app.runtime_label());
         });
 
         ui.add_space(14.0);
@@ -3437,25 +3594,6 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
                     );
                 }
             });
-
-        ui.add_space(12.0);
-        ui.columns(3, |columns| {
-            metric_chip(
-                &mut columns[0],
-                "30s peak",
-                format_hashrate_compact(
-                    app.hashrate_chart
-                        .last_window_peak
-                        .max(app.display_hashrate_hps),
-                ),
-            );
-            metric_chip(
-                &mut columns[1],
-                "Chart average",
-                format_hashrate_compact(app.hashrate_chart.chart_average(app.display_hashrate_hps)),
-            );
-            metric_chip(&mut columns[2], "Runtime", app.runtime_label());
-        });
     });
 }
 
