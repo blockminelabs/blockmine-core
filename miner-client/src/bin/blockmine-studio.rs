@@ -20,8 +20,9 @@ use blockmine_miner::mining_service::{
 };
 use blockmine_miner::rpc::RpcFacade;
 use blockmine_miner::session_wallet::{
-    load_managed_wallet_balances, sweep_single_session_delegate_wallet, SessionBalanceSummary,
-    SessionSweepSummary,
+    load_managed_wallet_balances, load_managed_wallets_balances,
+    sweep_single_session_delegate_wallet, SessionBalanceSummary, SessionSweepSummary,
+    SessionWalletBalance,
 };
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::wallet_store::{
@@ -55,6 +56,8 @@ const BACKGROUND_PARTICLE_DENSITY: f32 = 0.0000455;
 const BACKGROUND_MIN_PARTICLES: usize = 44;
 const BACKGROUND_MAX_PARTICLES: usize = 117;
 const APP_ICON_PNG: &[u8] = include_bytes!("../../img/logocircle.png");
+const ACTIVE_WALLET_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const WALLET_MANAGER_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(target_os = "windows")]
 const DESKTOP_PLATFORM_LABEL: &str = "Windows Miner";
@@ -507,15 +510,18 @@ struct BlockMineStudioApp {
     pending_phantom_bridge: Option<PendingPhantomBridge>,
     phantom_bridge_receiver: Option<Receiver<Result<PhantomBridgeCompletion, String>>>,
     session_balance_receiver: Option<Receiver<Result<SessionBalanceSummary, String>>>,
+    wallet_list_balance_receiver: Option<Receiver<Result<SessionBalanceSummary, String>>>,
     session_sweep_receiver: Option<Receiver<Result<SessionSweepSummary, String>>>,
-    current_block_receiver: Option<Receiver<Result<(u64, u8, u64), String>>>,
+    current_block_receiver: Option<Receiver<Result<(u64, u8, u64, u64), String>>>,
     gpu_autotune_receiver: Option<Receiver<GpuAutotuneMessage>>,
     gpu_autotune_status: Option<String>,
     gpu_autotune_best: Option<GpuAutotuneCandidate>,
     active_runtime_wallet: Option<ManagedWallet>,
     active_runtime_miner: Option<Pubkey>,
     session_balance_summary: Option<SessionBalanceSummary>,
+    wallet_list_balance_summary: Option<SessionBalanceSummary>,
     last_session_balance_refresh_at: Instant,
+    last_wallet_list_balance_refresh_at: Instant,
     last_current_block_refresh_at: Instant,
     show_deposit_modal: bool,
     show_withdrawal_modal: bool,
@@ -632,6 +638,7 @@ impl BlockMineStudioApp {
             pending_phantom_bridge: None,
             phantom_bridge_receiver: None,
             session_balance_receiver: None,
+            wallet_list_balance_receiver: None,
             session_sweep_receiver: None,
             current_block_receiver: None,
             gpu_autotune_receiver: None,
@@ -640,7 +647,9 @@ impl BlockMineStudioApp {
             active_runtime_wallet: None,
             active_runtime_miner: None,
             session_balance_summary: None,
+            wallet_list_balance_summary: None,
             last_session_balance_refresh_at: Instant::now(),
+            last_wallet_list_balance_refresh_at: Instant::now() - WALLET_MANAGER_REFRESH_INTERVAL,
             last_current_block_refresh_at: Instant::now() - Duration::from_secs(10),
             show_deposit_modal: false,
             show_withdrawal_modal: false,
@@ -707,6 +716,7 @@ impl BlockMineStudioApp {
         };
         app.refresh_gpu_devices();
         app.start_session_balance_refresh();
+        app.start_wallet_list_balance_refresh();
         app
     }
 
@@ -784,6 +794,8 @@ impl BlockMineStudioApp {
                     .cloned()
             })
             .or_else(|| self.available_wallets.first().cloned());
+        self.last_wallet_list_balance_refresh_at = Instant::now() - WALLET_MANAGER_REFRESH_INTERVAL;
+        self.start_wallet_list_balance_refresh();
     }
 
     fn select_active_wallet(&mut self, wallet: ManagedWallet) {
@@ -792,8 +804,8 @@ impl BlockMineStudioApp {
         self.seed_phrase_acknowledged = false;
         self.persist_ui_preferences();
         self.session_balance_receiver = None;
-        self.session_balance_summary = None;
-        self.last_session_balance_refresh_at = Instant::now() - Duration::from_secs(3);
+        self.session_balance_summary = self.cached_balance_summary_for_wallet(&wallet);
+        self.last_session_balance_refresh_at = Instant::now() - ACTIVE_WALLET_REFRESH_INTERVAL;
         self.start_session_balance_refresh();
         self.status = if self.mining_handle.is_some() {
             format!(
@@ -804,6 +816,23 @@ impl BlockMineStudioApp {
             format!("Active wallet set to {}.", shorten_pubkey(&wallet.pubkey))
         };
         self.error = None;
+    }
+
+    fn cached_balance_summary_for_wallet(
+        &self,
+        wallet: &ManagedWallet,
+    ) -> Option<SessionBalanceSummary> {
+        let summary = self.wallet_list_balance_summary.as_ref()?;
+        let balance = summary
+            .balances
+            .iter()
+            .find(|candidate| candidate.wallet_pubkey.to_string() == wallet.pubkey)?
+            .clone();
+        Some(single_wallet_balance_summary(
+            balance,
+            summary.bloc_mint,
+            summary.bloc_decimals,
+        ))
     }
 
     fn reset_wallet_manager_form(&mut self) {
@@ -947,10 +976,13 @@ impl BlockMineStudioApp {
                 self.persist_ui_preferences();
                 self.session_balance_receiver = None;
                 self.session_balance_summary = None;
-                self.last_session_balance_refresh_at = Instant::now() - Duration::from_secs(3);
+                self.last_session_balance_refresh_at = Instant::now() - ACTIVE_WALLET_REFRESH_INTERVAL;
+                self.last_wallet_list_balance_refresh_at =
+                    Instant::now() - WALLET_MANAGER_REFRESH_INTERVAL;
                 if self.active_wallet.is_some() {
                     self.start_session_balance_refresh();
                 }
+                self.start_wallet_list_balance_refresh();
                 if self
                     .phantom_session
                     .as_ref()
@@ -1078,6 +1110,31 @@ impl BlockMineStudioApp {
         });
     }
 
+    fn start_wallet_list_balance_refresh(&mut self) {
+        if self.wallet_list_balance_receiver.is_some() || self.available_wallets.is_empty() {
+            return;
+        }
+
+        let rpc_url = self.rpc_url.trim().to_string();
+        let program_id = match self.program_id.trim().parse::<Pubkey>() {
+            Ok(program_id) => program_id,
+            Err(error) => {
+                self.error = Some(format!("Invalid program id: {error}"));
+                return;
+            }
+        };
+        let wallets = self.available_wallets.clone();
+        let (sender, receiver) = mpsc::channel();
+        self.wallet_list_balance_receiver = Some(receiver);
+        self.last_wallet_list_balance_refresh_at = Instant::now();
+
+        thread::spawn(move || {
+            let result = load_managed_wallets_balances(&rpc_url, program_id, &wallets)
+                .map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        });
+    }
+
     fn start_current_block_refresh(&mut self) {
         if self.current_block_receiver.is_some() {
             return;
@@ -1097,16 +1154,17 @@ impl BlockMineStudioApp {
 
         thread::spawn(move || {
             let rpc = RpcFacade::new(&config);
-            let result = rpc
-                .fetch_current_block()
-                .map(|block| {
-                    (
-                        block.block_number,
-                        block.difficulty_bits,
-                        block.block_reward,
-                    )
-                })
-                .map_err(|error| error.to_string());
+            let result = (|| -> Result<(u64, u8, u64, u64)> {
+                let block = rpc.fetch_current_block()?;
+                let protocol = rpc.fetch_protocol_config()?;
+                Ok((
+                    block.block_number,
+                    block.difficulty_bits,
+                    block.block_reward,
+                    protocol.total_blocks_mined,
+                ))
+            })()
+            .map_err(|error| error.to_string());
             let _ = sender.send(result);
         });
     }
@@ -1474,6 +1532,29 @@ impl BlockMineStudioApp {
             }
         }
 
+        let wallet_list_balance_result = self
+            .wallet_list_balance_receiver
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok());
+        if let Some(result) = wallet_list_balance_result {
+            self.wallet_list_balance_receiver = None;
+            match result {
+                Ok(summary) => {
+                    self.wallet_list_balance_summary = Some(summary);
+                    if let Some(wallet) = self.active_wallet.clone() {
+                        if self.session_balance_receiver.is_none() {
+                            if let Some(summary) = self.cached_balance_summary_for_wallet(&wallet) {
+                                self.session_balance_summary = Some(summary);
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.error = Some(error);
+                }
+            }
+        }
+
         let current_block_result = self
             .current_block_receiver
             .as_ref()
@@ -1481,10 +1562,11 @@ impl BlockMineStudioApp {
         if let Some(result) = current_block_result {
             self.current_block_receiver = None;
             match result {
-                Ok((block_number, difficulty_bits, current_reward)) => {
+                Ok((block_number, difficulty_bits, current_reward, protocol_blocks_mined)) => {
                     self.latest_snapshot.current_block_number = block_number;
                     self.latest_snapshot.difficulty_bits = difficulty_bits;
                     self.latest_snapshot.current_reward = current_reward;
+                    self.latest_snapshot.protocol_blocks_mined = protocol_blocks_mined;
                 }
                 Err(error) => {
                     self.error = Some(error);
@@ -1567,7 +1649,7 @@ impl App for BlockMineStudioApp {
         self.mouse_particle_field
             .tick(screen_rect, pointer, stable_dt);
         if self.session_balance_receiver.is_none()
-            && self.last_session_balance_refresh_at.elapsed() >= Duration::from_secs(3)
+            && self.last_session_balance_refresh_at.elapsed() >= ACTIVE_WALLET_REFRESH_INTERVAL
             && (self.active_wallet.is_some()
                 || self.phantom_session.is_some()
                 || self.pending_phantom_bridge.is_some()
@@ -1575,6 +1657,12 @@ impl App for BlockMineStudioApp {
                 || self.session_balance_summary.is_some())
         {
             self.start_session_balance_refresh();
+        }
+        if self.wallet_list_balance_receiver.is_none()
+            && self.last_wallet_list_balance_refresh_at.elapsed() >= WALLET_MANAGER_REFRESH_INTERVAL
+            && (self.show_add_wallet_modal || !self.available_wallets.is_empty())
+        {
+            self.start_wallet_list_balance_refresh();
         }
         if self.current_block_receiver.is_none()
             && self.last_current_block_refresh_at.elapsed() >= Duration::from_secs(6)
@@ -2085,6 +2173,38 @@ impl App for BlockMineStudioApp {
                                                                 .monospace()
                                                                 .color(theme_muted()),
                                                         );
+                                                        ui.add_space(4.0);
+                                                        if let Some((sol_label, bloc_label)) =
+                                                            wallet_preview_labels(
+                                                                self.wallet_list_balance_summary
+                                                                    .as_ref(),
+                                                                &wallet,
+                                                            )
+                                                        {
+                                                            ui.horizontal_wrapped(|ui| {
+                                                                ui.label(
+                                                                    RichText::new(sol_label)
+                                                                        .size(12.0)
+                                                                        .color(theme_muted()),
+                                                                );
+                                                                ui.label(
+                                                                    RichText::new("•")
+                                                                        .size(12.0)
+                                                                        .color(theme_border()),
+                                                                );
+                                                                ui.label(
+                                                                    RichText::new(bloc_label)
+                                                                        .size(12.0)
+                                                                        .color(theme_muted()),
+                                                                );
+                                                            });
+                                                        } else {
+                                                            ui.label(
+                                                                RichText::new("Loading balances...")
+                                                                    .size(12.0)
+                                                                    .color(theme_muted()),
+                                                            );
+                                                        }
                                                     });
                                                     ui.with_layout(
                                                         egui::Layout::right_to_left(Align::Center),
@@ -2427,7 +2547,8 @@ impl App for BlockMineStudioApp {
                 (screen_rect.height() - 220.0).clamp(560.0, 700.0),
             );
             let current_block_number = displayed_current_block_number(&self.latest_snapshot);
-            let current_era = reward_era_for_block(current_block_number);
+            let protocol_blocks_mined = self.latest_snapshot.protocol_blocks_mined;
+            let current_era = reward_era_for_block(protocol_blocks_mined);
             let mut modal_rect = None;
             if let Some(window) = egui::Window::new("Mining Curve")
                 .collapsible(false)
@@ -2462,6 +2583,13 @@ impl App for BlockMineStudioApp {
                                         .strong()
                                         .color(theme_text()),
                                 );
+                                ui.separator();
+                                ui.label(RichText::new("Blocks mined").color(theme_muted()));
+                                ui.label(
+                                    RichText::new(protocol_blocks_mined.to_string())
+                                        .strong()
+                                        .color(theme_text()),
+                                );
                             });
                         });
                     ui.add_space(10.0);
@@ -2488,7 +2616,8 @@ impl App for BlockMineStudioApp {
 
                                         for row in ERA_SCHEDULE_ROWS {
                                             let is_current = row.era == current_era.index;
-                                            let mined_progress = format_era_progress(row, current_block_number);
+                                            let mined_progress =
+                                                format_era_progress(row, protocol_blocks_mined);
                                             render_schedule_cell(ui, row.era.to_string(), true, is_current);
                                             render_schedule_cell(ui, row.name, false, is_current);
                                             render_schedule_cell(ui, row.block_range, false, is_current);
@@ -2696,6 +2825,43 @@ fn save_desktop_ui_preferences(preferences: &DesktopUiPreferences) -> Result<()>
 
 fn desktop_ui_preferences_path() -> Result<PathBuf> {
     Ok(app_storage_dir()?.join("desktop-ui-preferences.json"))
+}
+
+fn single_wallet_balance_summary(
+    balance: SessionWalletBalance,
+    bloc_mint: Pubkey,
+    bloc_decimals: u8,
+) -> SessionBalanceSummary {
+    let funded_wallet_count = usize::from(balance.balance_lamports > 0 || balance.bloc_balance_raw > 0);
+    let total_balance_lamports = balance.balance_lamports;
+    let total_bloc_balance_raw = balance.bloc_balance_raw;
+    SessionBalanceSummary {
+        wallet_count: 1,
+        funded_wallet_count,
+        total_balance_lamports,
+        total_bloc_balance_raw,
+        bloc_mint,
+        bloc_decimals,
+        balances: vec![balance],
+    }
+}
+
+fn wallet_preview_labels(
+    summary: Option<&SessionBalanceSummary>,
+    wallet: &ManagedWallet,
+) -> Option<(String, String)> {
+    let summary = summary?;
+    let balance = summary
+        .balances
+        .iter()
+        .find(|candidate| candidate.wallet_pubkey.to_string() == wallet.pubkey)?;
+    Some((
+        format!("{} SOL", format_sol_compact(balance.balance_lamports)),
+        format!(
+            "{} BLOC",
+            format_decimal_amount_trimmed(balance.bloc_balance_raw, summary.bloc_decimals)
+        ),
+    ))
 }
 
 fn format_era_progress(row: EraScheduleRow, current_block_number: u64) -> String {
@@ -3171,6 +3337,9 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                         .clicked()
                     {
                         app.show_add_wallet_modal = true;
+                        app.last_wallet_list_balance_refresh_at =
+                            Instant::now() - WALLET_MANAGER_REFRESH_INTERVAL;
+                        app.start_wallet_list_balance_refresh();
                     }
                 });
             });
@@ -3431,7 +3600,8 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
     card_frame(ui, "Protocol telemetry", |ui| {
         let current_block_number = displayed_current_block_number(&app.latest_snapshot);
-        let current_era = reward_era_for_block(current_block_number);
+        let protocol_blocks_mined = app.latest_snapshot.protocol_blocks_mined;
+        let current_era = reward_era_for_block(protocol_blocks_mined);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Current era").color(theme_muted()).size(13.0));
             ui.label(
@@ -3472,7 +3642,7 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             metric(
                 &mut cols[1],
                 "Blocks mined",
-                app.latest_snapshot.session_blocks_mined.to_string(),
+                protocol_blocks_mined.to_string(),
             );
         });
     });

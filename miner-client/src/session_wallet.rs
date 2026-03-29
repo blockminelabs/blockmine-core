@@ -107,6 +107,14 @@ pub fn load_managed_wallet_balances(
     load_wallet_balances(rpc_url, program_id, &[wallet.clone()])
 }
 
+pub fn load_managed_wallets_balances(
+    rpc_url: &str,
+    program_id: Pubkey,
+    wallets: &[ManagedWallet],
+) -> Result<SessionBalanceSummary> {
+    load_wallet_balances(rpc_url, program_id, wallets)
+}
+
 fn load_wallet_balances(
     rpc_url: &str,
     program_id: Pubkey,
