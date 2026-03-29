@@ -54,7 +54,7 @@ const BACKGROUND_CURSOR_DISTANCE: f32 = 152.0;
 const BACKGROUND_PARTICLE_DENSITY: f32 = 0.0000455;
 const BACKGROUND_MIN_PARTICLES: usize = 44;
 const BACKGROUND_MAX_PARTICLES: usize = 117;
-const DASHBOARD_PANEL_HEIGHT: f32 = 352.0;
+const DASHBOARD_PANEL_HEIGHT: f32 = 332.0;
 const APP_ICON_PNG: &[u8] = include_bytes!("../../img/logocircle.png");
 
 #[cfg(target_os = "windows")]
@@ -460,8 +460,8 @@ impl MouseParticleFieldState {
 fn main() -> eframe::Result<()> {
     let mut native_options = NativeOptions::default();
     native_options.viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1380.0, 860.0])
-        .with_min_inner_size([1220.0, 820.0])
+        .with_inner_size([1320.0, 840.0])
+        .with_min_inner_size([1180.0, 780.0])
         .with_maximized(false)
         .with_title("BlockMine Studio")
         .with_icon(load_app_icon());
@@ -1641,13 +1641,16 @@ impl App for BlockMineStudioApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
+
                     ui.columns(2, |columns| {
                         render_wallet_card(&mut columns[0], self);
-                        columns[0].add_space(14.0);
-                        render_miner_controls_card(&mut columns[0], self);
-
                         render_hashrate_signal_card(&mut columns[1], self);
-                        columns[1].add_space(14.0);
+                    });
+
+                    ui.add_space(14.0);
+
+                    ui.columns(2, |columns| {
+                        render_miner_controls_card(&mut columns[0], self);
                         render_live_telemetry_card(&mut columns[1], self);
                     });
                 });
@@ -3162,7 +3165,7 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             ui.set_min_height(DASHBOARD_PANEL_HEIGHT);
             ui.horizontal_top(|ui| {
                 ui.heading(RichText::new("Wallet").color(theme_text()));
-                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     if ui
                         .add(
                             egui::Button::new(
@@ -3171,7 +3174,7 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                                     .strong()
                                     .color(theme_text()),
                             )
-                            .min_size(egui::vec2(118.0, 34.0)),
+                            .min_size(egui::vec2(124.0, 36.0)),
                         )
                         .clicked()
                     {
@@ -3185,7 +3188,7 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                                     .strong()
                                     .color(theme_text()),
                             )
-                            .min_size(egui::vec2(152.0, 34.0)),
+                            .min_size(egui::vec2(158.0, 36.0)),
                         )
                         .clicked()
                     {
