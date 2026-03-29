@@ -54,7 +54,6 @@ const BACKGROUND_CURSOR_DISTANCE: f32 = 152.0;
 const BACKGROUND_PARTICLE_DENSITY: f32 = 0.0000455;
 const BACKGROUND_MIN_PARTICLES: usize = 44;
 const BACKGROUND_MAX_PARTICLES: usize = 117;
-const DASHBOARD_PANEL_HEIGHT: f32 = 332.0;
 const APP_ICON_PNG: &[u8] = include_bytes!("../../img/logocircle.png");
 
 #[cfg(target_os = "windows")]
@@ -460,9 +459,8 @@ impl MouseParticleFieldState {
 fn main() -> eframe::Result<()> {
     let mut native_options = NativeOptions::default();
     native_options.viewport = egui::ViewportBuilder::default()
-        .with_inner_size([1320.0, 840.0])
-        .with_min_inner_size([1180.0, 780.0])
-        .with_maximized(false)
+        .with_inner_size([1500.0, 980.0])
+        .with_min_inner_size([1180.0, 820.0])
         .with_title("BlockMine Studio")
         .with_icon(load_app_icon());
 
@@ -1641,16 +1639,13 @@ impl App for BlockMineStudioApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(14.0, 14.0);
-
                     ui.columns(2, |columns| {
                         render_wallet_card(&mut columns[0], self);
-                        render_hashrate_signal_card(&mut columns[1], self);
-                    });
-
-                    ui.add_space(14.0);
-
-                    ui.columns(2, |columns| {
+                        columns[0].add_space(14.0);
                         render_miner_controls_card(&mut columns[0], self);
+
+                        render_hashrate_signal_card(&mut columns[1], self);
+                        columns[1].add_space(14.0);
                         render_live_telemetry_card(&mut columns[1], self);
                     });
                 });
@@ -3057,15 +3052,6 @@ fn paint_frame_glow(ui: &egui::Ui, rect: egui::Rect, rounding: egui::Rounding) {
 }
 
 fn card_frame(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
-    card_frame_sized(ui, title, None, add_contents);
-}
-
-fn card_frame_sized(
-    ui: &mut egui::Ui,
-    title: &str,
-    min_height: Option<f32>,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
     let rounding = egui::Rounding::same(18.0);
     let response = egui::Frame::group(ui.style())
         .fill(theme_card())
@@ -3073,9 +3059,6 @@ fn card_frame_sized(
         .rounding(rounding)
         .inner_margin(egui::Margin::same(16.0))
         .show(ui, |ui| {
-            if let Some(height) = min_height {
-                ui.set_min_height(height);
-            }
             ui.horizontal(|ui| {
                 ui.heading(RichText::new(title).color(theme_text()));
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |_ui| {});
@@ -3162,19 +3145,15 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
         .rounding(rounding)
         .inner_margin(egui::Margin::same(16.0))
         .show(ui, |ui| {
-            ui.set_min_height(DASHBOARD_PANEL_HEIGHT);
             ui.horizontal_top(|ui| {
                 ui.heading(RichText::new("Wallet").color(theme_text()));
-                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                     if ui
                         .add(
                             egui::Button::new(
-                                RichText::new("Recovery")
-                                    .size(14.0)
-                                    .strong()
-                                    .color(theme_text()),
+                                RichText::new("Recovery").size(13.0).color(theme_text()),
                             )
-                            .min_size(egui::vec2(124.0, 36.0)),
+                            .min_size(egui::vec2(114.0, 30.0)),
                         )
                         .clicked()
                     {
@@ -3184,11 +3163,10 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                         .add(
                             egui::Button::new(
                                 RichText::new("Manage wallets")
-                                    .size(14.0)
-                                    .strong()
+                                    .size(13.0)
                                     .color(theme_text()),
                             )
-                            .min_size(egui::vec2(158.0, 36.0)),
+                            .min_size(egui::vec2(140.0, 30.0)),
                         )
                         .clicked()
                     {
@@ -3296,112 +3274,162 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 }
 
 fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
-    card_frame_sized(ui, "Miner controls", Some(DASHBOARD_PANEL_HEIGHT), |ui| {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.selectable_value(
-                        &mut app.miner_controls_mode,
-                        MinerControlsMode::Fast,
-                        "Fast",
-                    );
-                    ui.selectable_value(
-                        &mut app.miner_controls_mode,
-                        MinerControlsMode::Advanced,
-                        "Advanced",
-                    );
-                });
+    card_frame(ui, "Miner controls", |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(
+                &mut app.miner_controls_mode,
+                MinerControlsMode::Fast,
+                "Fast",
+            );
+            ui.selectable_value(
+                &mut app.miner_controls_mode,
+                MinerControlsMode::Advanced,
+                "Advanced",
+            );
+        });
+        ui.add_space(10.0);
+
+        match app.miner_controls_mode {
+            MinerControlsMode::Fast => {
+                ui.label(
+                    RichText::new("Pick one engine, check the hardware label, then start mining.")
+                        .color(theme_muted()),
+                );
                 ui.add_space(10.0);
-
-                match app.miner_controls_mode {
-                    MinerControlsMode::Fast => {
-                        ui.label(
-                            RichText::new("Pick one engine, check the hardware label, then start mining.")
-                                .color(theme_muted()),
-                        );
-                        ui.add_space(10.0);
-                        ui.columns(2, |columns| {
-                            if render_fast_mode_choice(
-                                &mut columns[0],
-                                "CPU",
-                                &app.cpu_model_label,
-                                app.fast_mining_choice == FastMiningChoice::Cpu,
-                            ) {
-                                app.fast_mining_choice = FastMiningChoice::Cpu;
-                                app.backend = BackendMode::Cpu;
-                            }
-                            if render_fast_mode_choice(
-                                &mut columns[1],
-                                "GPU",
-                                &selected_gpu_summary(app),
-                                app.fast_mining_choice == FastMiningChoice::Gpu,
-                            ) {
-                                app.fast_mining_choice = FastMiningChoice::Gpu;
-                                app.backend = BackendMode::Gpu;
-                            }
-                        });
+                ui.columns(2, |columns| {
+                    if render_fast_mode_choice(
+                        &mut columns[0],
+                        "CPU",
+                        &app.cpu_model_label,
+                        app.fast_mining_choice == FastMiningChoice::Cpu,
+                    ) {
+                        app.fast_mining_choice = FastMiningChoice::Cpu;
+                        app.backend = BackendMode::Cpu;
                     }
-                    MinerControlsMode::Advanced => {
-                        egui::Frame::group(ui.style())
-                            .fill(theme_card_alt())
-                            .stroke(egui::Stroke::new(1.0, theme_border()))
-                            .rounding(egui::Rounding::same(16.0))
-                            .inner_margin(egui::Margin::same(14.0))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new("RPC endpoint").color(theme_accent()));
-                                ui.add_space(6.0);
-                                ui.add(
-                                    TextEdit::singleline(&mut app.rpc_url)
-                                        .desired_width(ui.available_width()),
-                                );
-                            });
-                        ui.add_space(12.0);
-
-                        ui.horizontal_wrapped(|ui| {
-                            ui.selectable_value(&mut app.backend, BackendMode::Cpu, "CPU tuning");
-                            ui.selectable_value(&mut app.backend, BackendMode::Gpu, "GPU tuning");
-                        });
-
-                        ui.add_space(8.0);
-                        match app.backend {
-                            BackendMode::Cpu => {
-                                ui.label(
-                                    RichText::new(
-                                        "Tune batch size, worker count and pinned cores for CPU-only rigs.",
-                                    )
-                                    .color(theme_muted()),
-                                );
-                                ui.add_space(10.0);
-                                grid_cpu_fields(ui, &mut app.batch_size, &mut app.cpu_threads);
-                                ui.add_space(10.0);
-                                render_cpu_core_picker(ui, app);
-                            }
-                            BackendMode::Gpu | BackendMode::Both => {
-                                ui.label(
-                                    RichText::new(
-                                        "Pick the cards you want, then fine-tune batch and work size only if you really need to.",
-                                    )
-                                    .color(theme_muted()),
-                                );
-                                ui.add_space(10.0);
-                                grid_gpu_primary_fields(
-                                    ui,
-                                    &mut app.gpu_batch_size,
-                                    &mut app.gpu_local_work_size,
-                                );
-                                ui.add_space(10.0);
-                                render_gpu_picker(ui, app, true);
-                            }
+                    if render_fast_mode_choice(
+                        &mut columns[1],
+                        "GPU",
+                        &selected_gpu_summary(app),
+                        app.fast_mining_choice == FastMiningChoice::Gpu,
+                    ) {
+                        app.fast_mining_choice = FastMiningChoice::Gpu;
+                        app.backend = BackendMode::Gpu;
+                    }
+                });
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            app.mining_handle.is_none(),
+                            egui::Button::new(
+                                RichText::new("Start mining").color(theme_button_text()),
+                            )
+                            .fill(theme_accent())
+                            .min_size(egui::vec2(220.0, 46.0)),
+                        )
+                        .clicked()
+                    {
+                        match app.fast_mining_choice {
+                            FastMiningChoice::Cpu => app.start_cpu_mining(),
+                            FastMiningChoice::Gpu => app.start_gpu_mining(),
                         }
                     }
+                    if ui
+                        .add_enabled(
+                            app.mining_handle.is_some(),
+                            egui::Button::new("Stop mining").min_size(egui::vec2(160.0, 46.0)),
+                        )
+                        .clicked()
+                    {
+                        app.stop_mining();
+                    }
+                });
+            }
+            MinerControlsMode::Advanced => {
+                egui::Frame::group(ui.style())
+                    .fill(theme_card_alt())
+                    .stroke(egui::Stroke::new(1.0, theme_border()))
+                    .rounding(egui::Rounding::same(16.0))
+                    .inner_margin(egui::Margin::same(14.0))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("RPC endpoint").color(theme_accent()));
+                        ui.add_space(6.0);
+                        ui.add(
+                            TextEdit::singleline(&mut app.rpc_url)
+                                .desired_width(ui.available_width()),
+                        );
+                    });
+                ui.add_space(12.0);
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.selectable_value(&mut app.backend, BackendMode::Cpu, "CPU tuning");
+                    ui.selectable_value(&mut app.backend, BackendMode::Gpu, "GPU tuning");
+                });
+
+                ui.add_space(8.0);
+                match app.backend {
+                    BackendMode::Cpu => {
+                        ui.label(
+                            RichText::new(
+                                "Tune batch size, worker count and pinned cores for CPU-only rigs.",
+                            )
+                            .color(theme_muted()),
+                        );
+                        ui.add_space(10.0);
+                        grid_cpu_fields(ui, &mut app.batch_size, &mut app.cpu_threads);
+                        ui.add_space(10.0);
+                        render_cpu_core_picker(ui, app);
+                    }
+                    BackendMode::Gpu | BackendMode::Both => {
+                        ui.label(
+                            RichText::new(
+                                "Pick the cards you want, then fine-tune batch and work size only if you really need to.",
+                            )
+                            .color(theme_muted()),
+                        );
+                        ui.add_space(10.0);
+                        grid_gpu_primary_fields(
+                            ui,
+                            &mut app.gpu_batch_size,
+                            &mut app.gpu_local_work_size,
+                        );
+                        ui.add_space(10.0);
+                        render_gpu_picker(ui, app, true);
+                    }
                 }
-            });
+
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            app.mining_handle.is_none(),
+                            egui::Button::new(
+                                RichText::new("Start mining").color(theme_button_text()),
+                            )
+                            .fill(theme_accent())
+                            .min_size(egui::vec2(180.0, 42.0)),
+                        )
+                        .clicked()
+                    {
+                        app.start_mining();
+                    }
+                    if ui
+                        .add_enabled(
+                            app.mining_handle.is_some(),
+                            egui::Button::new("Stop mining").min_size(egui::vec2(140.0, 42.0)),
+                        )
+                        .clicked()
+                    {
+                        app.stop_mining();
+                    }
+                });
+            }
+        }
     });
 }
 
 fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
-    card_frame_sized(ui, "Protocol telemetry", Some(DASHBOARD_PANEL_HEIGHT), |ui| {
+    card_frame(ui, "Protocol telemetry", |ui| {
         let current_block_number = displayed_current_block_number(&app.latest_snapshot);
         let current_era = reward_era_for_block(current_block_number);
         ui.horizontal_wrapped(|ui| {
@@ -3450,39 +3478,8 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
     });
 }
 
-fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
-    card_frame_sized(ui, "Mining stats", Some(DASHBOARD_PANEL_HEIGHT), |ui| {
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            if ui
-                .add_enabled(
-                    app.mining_handle.is_some(),
-                    egui::Button::new("Stop mining").min_size(egui::vec2(140.0, 38.0)),
-                )
-                .clicked()
-            {
-                app.stop_mining();
-            }
-            if ui
-                .add_enabled(
-                    app.mining_handle.is_none(),
-                    egui::Button::new(
-                        RichText::new("Start mining").color(theme_button_text()),
-                    )
-                    .fill(theme_accent())
-                    .min_size(egui::vec2(160.0, 38.0)),
-                )
-                .clicked()
-            {
-                match app.miner_controls_mode {
-                    MinerControlsMode::Fast => match app.fast_mining_choice {
-                        FastMiningChoice::Cpu => app.start_cpu_mining(),
-                        FastMiningChoice::Gpu => app.start_gpu_mining(),
-                    },
-                    MinerControlsMode::Advanced => app.start_mining(),
-                }
-            }
-        });
-        ui.add_space(10.0);
+fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
+    card_frame(ui, "Mining stats", |ui| {
         ui.columns(4, |columns| {
             metric_chip(
                 &mut columns[0],
@@ -3509,7 +3506,7 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) 
             .rounding(egui::Rounding::same(20.0))
             .inner_margin(egui::Margin::same(14.0))
             .show(ui, |ui| {
-                let chart_height = 180.0;
+                let chart_height = 220.0;
                 let desired_size = egui::vec2(ui.available_width(), chart_height);
                 let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
                 let painter = ui.painter_at(rect);
