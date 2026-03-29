@@ -2,12 +2,11 @@ use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::{
-    BLOCK_HISTORY_SEED, CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED, MINING_SESSION_SEED,
-    VAULT_AUTHORITY_SEED,
+    CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED, MINING_SESSION_SEED, VAULT_AUTHORITY_SEED,
 };
 use crate::errors::ErrorCode;
 use crate::events::MiningSessionAuthorized;
-use crate::state::{BlockHistory, CurrentBlock, MinerStats, MiningSession, ProtocolConfig};
+use crate::state::{CurrentBlock, MinerStats, MiningSession, ProtocolConfig};
 
 use super::submit_solution::{process_submission, SubmitSolutionArgs};
 
@@ -58,14 +57,6 @@ pub struct SubmitSolutionWithSession<'info> {
         bump = miner_stats.bump
     )]
     pub miner_stats: Box<Account<'info, MinerStats>>,
-    #[account(
-        init,
-        payer = delegate,
-        seeds = [BLOCK_HISTORY_SEED, &current_block.block_number.to_le_bytes()],
-        bump,
-        space = 8 + BlockHistory::INIT_SPACE
-    )]
-    pub block_history: Box<Account<'info, BlockHistory>>,
     #[account(address = config.bloc_mint @ ErrorCode::InvalidMint)]
     pub bloc_mint: Box<Account<'info, Mint>>,
     #[account(
@@ -153,15 +144,12 @@ pub fn submit_with_session_handler(
         );
     }
 
-    let block_history_bump = ctx.bumps.block_history;
     process_submission(
         ctx.accounts.miner.key(),
         args.nonce,
-        block_history_bump,
         &mut ctx.accounts.config,
         &mut ctx.accounts.current_block,
         &mut ctx.accounts.miner_stats,
-        &mut ctx.accounts.block_history,
         &ctx.accounts.bloc_mint,
         &mut ctx.accounts.reward_vault,
         &ctx.accounts.treasury_authority,

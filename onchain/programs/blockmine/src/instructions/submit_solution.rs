@@ -4,14 +4,14 @@ use anchor_lang::system_program::{self, Transfer as SystemTransfer};
 use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 
 use crate::constants::{
-    BLOCK_HISTORY_SEED, BLOCK_STATUS_CLOSED, BLOCK_STATUS_OPEN, CONFIG_SEED, CURRENT_BLOCK_SEED,
-    MINER_STATS_SEED, VAULT_AUTHORITY_SEED,
+    BLOCK_STATUS_CLOSED, BLOCK_STATUS_OPEN, CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED,
+    VAULT_AUTHORITY_SEED,
 };
 use crate::errors::ErrorCode;
 use crate::events::{BlockOpened, BlockSolved, DifficultyAdjusted};
 use crate::math::difficulty::{calculate_next_difficulty, hash_meets_target};
 use crate::math::rewards::reward_era_for_open_block;
-use crate::state::{BlockHistory, CurrentBlock, MinerStats, ProtocolConfig};
+use crate::state::{CurrentBlock, MinerStats, ProtocolConfig};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct SubmitSolutionArgs {
@@ -32,14 +32,6 @@ pub struct SubmitSolution<'info> {
         bump = miner_stats.bump
     )]
     pub miner_stats: Box<Account<'info, MinerStats>>,
-    #[account(
-        init,
-        payer = miner,
-        seeds = [BLOCK_HISTORY_SEED, &current_block.block_number.to_le_bytes()],
-        bump,
-        space = 8 + BlockHistory::INIT_SPACE
-    )]
-    pub block_history: Box<Account<'info, BlockHistory>>,
     #[account(address = config.bloc_mint @ ErrorCode::InvalidMint)]
     pub bloc_mint: Box<Account<'info, Mint>>,
     #[account(
@@ -71,15 +63,12 @@ pub struct SubmitSolution<'info> {
 }
 
 pub fn handler(ctx: Context<SubmitSolution>, args: SubmitSolutionArgs) -> Result<()> {
-    let block_history_bump = ctx.bumps.block_history;
     process_submission(
         ctx.accounts.miner.key(),
         args.nonce,
-        block_history_bump,
         &mut ctx.accounts.config,
         &mut ctx.accounts.current_block,
         &mut ctx.accounts.miner_stats,
-        &mut ctx.accounts.block_history,
         &ctx.accounts.bloc_mint,
         &mut ctx.accounts.reward_vault,
         &ctx.accounts.treasury_authority,
@@ -96,11 +85,9 @@ pub fn handler(ctx: Context<SubmitSolution>, args: SubmitSolutionArgs) -> Result
 pub(crate) fn process_submission<'info>(
     miner: Pubkey,
     nonce: u64,
-    block_history_bump: u8,
     config: &mut Account<'info, ProtocolConfig>,
     current_block: &mut Account<'info, CurrentBlock>,
     miner_stats: &mut Account<'info, MinerStats>,
-    block_history: &mut Account<'info, BlockHistory>,
     bloc_mint: &Account<'info, Mint>,
     reward_vault: &mut Account<'info, TokenAccount>,
     treasury_authority: &UncheckedAccount<'info>,
@@ -218,18 +205,6 @@ pub(crate) fn process_submission<'info>(
         .ok_or(ErrorCode::MathOverflow)?;
     miner_stats.last_submission_time = clock.unix_timestamp;
 
-    block_history.block_number = block_number;
-    block_history.winner = miner;
-    block_history.reward = current_reward;
-    block_history.hash = hash;
-    block_history.nonce = nonce;
-    block_history.timestamp = clock.unix_timestamp;
-    block_history.difficulty_bits = current_bits;
-    block_history.bump = block_history_bump;
-    block_history._padding0 = [0u8; 6];
-    block_history.difficulty_target = current_target;
-    block_history.challenge = current_challenge;
-
     current_block.status = BLOCK_STATUS_CLOSED;
     current_block.winner = miner;
     current_block.winning_nonce = nonce;
@@ -241,6 +216,9 @@ pub(crate) fn process_submission<'info>(
         winner: miner,
         nonce,
         hash,
+        challenge: current_challenge,
+        difficulty_bits: current_bits,
+        difficulty_target: current_target,
         era_index: current_era.index,
         era_name: current_era.name,
         reward: current_reward,

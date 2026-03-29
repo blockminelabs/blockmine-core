@@ -67,7 +67,7 @@ This is what makes the mining schedule stop exactly at:
 For devnet-only admin resets:
 
 - the protocol reopens at a fresh block number instead of rewinding to block `0`
-- this avoids `BlockHistory` PDA collisions with already-solved historical blocks
+- this avoids replaying historical block numbers during rehearsal resets
 
 For mainnet posture:
 

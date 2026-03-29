@@ -29,7 +29,7 @@ Including the miner pubkey in the proof prevents the simplest form of nonce thef
 7. the `BLOC` reward is split:
    - `99%` to the miner
    - `1%` to the treasury vault
-8. block history is written
+8. the solved-block event is emitted
 9. the next block is opened with a fresh challenge and target
 
 If a block expires before a valid solve arrives, anyone can rotate the stale block and keep the protocol live.
@@ -97,7 +97,7 @@ The final Scarcity tail is capped so the mining schedule stops exactly at `20,00
 The core V1 guarantees come from structure:
 
 - one mutable current-block account
-- one deterministic history record per solved block
+- one canonical solved-block event trail
 - one reward vault owned by the program PDA
 - one canonical treasury route loaded from config
 

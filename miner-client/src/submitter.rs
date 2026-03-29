@@ -61,15 +61,6 @@ pub fn submit_solution(rpc: &RpcFacade, signer: &Keypair, nonce: u64) -> Result<
     let miner_stats_pda = rpc.miner_stats_pda(&signer.pubkey()).0;
     let vault_authority_pda = rpc.vault_authority_pda().0;
     let protocol_config = rpc.fetch_protocol_config()?;
-    let current_block = rpc.fetch_current_block()?;
-    let block_history_pda = solana_sdk::pubkey::Pubkey::find_program_address(
-        &[
-            blockmine_program::constants::BLOCK_HISTORY_SEED,
-            &current_block.block_number.to_le_bytes(),
-        ],
-        &rpc.program_id,
-    )
-    .0;
     let miner_token_account =
         ensure_associated_token_account(rpc, signer, signer.pubkey(), protocol_config.bloc_mint)
             .context("failed to create or load miner ATA")?;
@@ -79,7 +70,6 @@ pub fn submit_solution(rpc: &RpcFacade, signer: &Keypair, nonce: u64) -> Result<
         config: config_pda,
         current_block: current_block_pda,
         miner_stats: miner_stats_pda,
-        block_history: block_history_pda,
         bloc_mint: protocol_config.bloc_mint,
         reward_vault: protocol_config.reward_vault,
         treasury_authority: protocol_config.treasury_authority,
@@ -113,15 +103,6 @@ pub fn submit_solution_with_session(
     let miner_stats_pda = rpc.miner_stats_pda(&miner).0;
     let vault_authority_pda = rpc.vault_authority_pda().0;
     let protocol_config = rpc.fetch_protocol_config()?;
-    let current_block = rpc.fetch_current_block()?;
-    let block_history_pda = solana_sdk::pubkey::Pubkey::find_program_address(
-        &[
-            blockmine_program::constants::BLOCK_HISTORY_SEED,
-            &current_block.block_number.to_le_bytes(),
-        ],
-        &rpc.program_id,
-    )
-    .0;
     let miner_token_account =
         ensure_associated_token_account(rpc, delegate_signer, miner, protocol_config.bloc_mint)
             .context("failed to create or load miner ATA for session submit")?;
@@ -133,7 +114,6 @@ pub fn submit_solution_with_session(
         config: config_pda,
         current_block: current_block_pda,
         miner_stats: miner_stats_pda,
-        block_history: block_history_pda,
         bloc_mint: protocol_config.bloc_mint,
         reward_vault: protocol_config.reward_vault,
         treasury_authority: protocol_config.treasury_authority,

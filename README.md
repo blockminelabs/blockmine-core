@@ -168,7 +168,7 @@ If valid:
 - the miner receives the block reward minus the treasury BLOC fee
 - the treasury receives its BLOC share
 - the treasury also receives the flat SOL submit fee
-- a `BlockHistory` record is created
+- a canonical solved-block event is emitted
 - the current block is marked closed
 
 ### 3.6 The next block is opened
@@ -210,15 +210,15 @@ That happens for three reasons:
 
 So once the winning path executes, later transactions are no longer solving the same open block.
 
-### 4.2 `BlockHistory` is unique per block number
+### 4.2 Settlement is single-writer
 
-The solved-block history account is created with a deterministic PDA keyed by the block number.
+The protocol does not need a second per-block account to enforce winner uniqueness.
 
-That means:
+That happens because:
 
-- block `N` has one canonical history PDA
-- the first accepted winner initializes it
-- another winner for the same block cannot initialize a second one
+- block `N` has one canonical mutable `CurrentBlock`
+- the first accepted winner closes it
+- later racing transactions hit closed-or-stale state and fail cleanly
 
 ### 4.3 Solana account locking serializes the settlement path
 
@@ -226,7 +226,6 @@ Competing winning transactions all need the same writable accounts:
 
 - `config`
 - `current_block`
-- `block_history(block_number)`
 - vault and stats state
 
 So Solana serializes the state transition. Many miners can race to submit, but only one accepted state transition can settle the block.
@@ -354,7 +353,7 @@ BlockMine already reduces the attack surface in several layers:
    The solution is checked against the live block state, not against a vague client-side guess.
 
 3. **Unique settlement path**  
-   There is one `CurrentBlock` and one `BlockHistory` for each block number.
+   There is one canonical mutable `CurrentBlock` for the live block number, and only one accepted settlement can close it.
 
 4. **Session constraints**  
    Delegated mining is tightly bound to the authorized miner/delegate pair.
@@ -696,20 +695,21 @@ Delegated mining authorization:
 - submission cap
 - active flag
 
-### `BlockHistory`
+### Solved-block event trail
 
-One immutable solved-block record per accepted block:
+Accepted blocks are published through canonical `BlockSolved` events instead of forcing miners to fund a rent-bearing history account on every win.
+
+That preserves:
 
 - block number
 - winner
 - reward
-- hash
 - nonce
-- timestamp
-- target
-- challenge
+- hash
+- challenge snapshot
+- difficulty snapshot
 
-That one-record-per-block design is simple and audit-friendly, even though it comes with long-term state growth tradeoffs.
+while removing the old per-win rent overhead from the settlement path.
 
 ### Instruction set
 
@@ -780,7 +780,6 @@ BlockMine is engineered so that the most important safety properties come from p
 Only one block settlement can be accepted for a given block number because:
 
 - there is one canonical mutable `CurrentBlock`
-- there is one deterministic `BlockHistory` PDA per block number
 - Solana account locking serializes the winning settlement path
 
 ### 12.2 Proof ownership binding
@@ -873,7 +872,7 @@ That file is the right place for public-facing security assumptions, launch post
 | Permanent stall from an over-hard block | Permissionless `rotate_stale_block` restores liveness after TTL expiry | Liveness is restored, but the stale path currently hard-resets difficulty to the minimum |
 | Front-running / MEV / ordering abuse | Wallet binding blocks simple nonce theft | Ordering MEV and censorship still exist; V1 does not yet eliminate public-orderflow timing risk |
 | Session abuse after approval | Sessions store `active`, `expires_at`, `max_submissions`, and delegate binding | If the delegate key is stolen, it remains dangerous until expiry or exhaustion |
-| State-growth / account-bloat risk | Economic friction and operational awareness | Every solved block still creates a `BlockHistory` account, so the scaling tradeoff remains |
+| Historical traceability dependency | Canonical solved-block events | Rich solved-block history is now event/indexer-driven rather than stored in a dedicated account per accepted block |
 
 ---
 
@@ -898,7 +897,6 @@ For technical readers who want the exact code anchors, these are the substantive
 - Reward curve and scarcity tail: [`onchain/programs/blockmine/src/math/rewards.rs`](onchain/programs/blockmine/src/math/rewards.rs)
 - Global config state: [`onchain/programs/blockmine/src/state/protocol_config.rs`](onchain/programs/blockmine/src/state/protocol_config.rs)
 - Live block state: [`onchain/programs/blockmine/src/state/current_block.rs`](onchain/programs/blockmine/src/state/current_block.rs)
-- Solved block state: [`onchain/programs/blockmine/src/state/block_history.rs`](onchain/programs/blockmine/src/state/block_history.rs)
 - Miner lifetime stats: [`onchain/programs/blockmine/src/state/miner_stats.rs`](onchain/programs/blockmine/src/state/miner_stats.rs)
 - Delegated session state: [`onchain/programs/blockmine/src/state/mining_session.rs`](onchain/programs/blockmine/src/state/mining_session.rs)
 

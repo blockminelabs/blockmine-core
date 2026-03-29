@@ -17,9 +17,10 @@ Blockmine splits mining into two layers:
   - only a winning solution is sent on-chain
 - **on-chain settlement**
   - the program stores canonical protocol state
-  - the program verifies the submitted proof
-  - the program routes rewards and fees
-  - the program opens the next logical block
+- the program verifies the submitted proof
+- the program routes rewards and fees
+- the program opens the next logical block
+- the program emits a canonical solved-block event trail
 
 This keeps brute-force hashing off-chain while preserving deterministic settlement on Solana.
 
@@ -33,7 +34,7 @@ The Solana program does not mine. It owns the canonical state machine:
 - compares the result against the live target
 - transfers miner and treasury rewards from the reward vault
 - transfers the fixed accepted-block `SOL` fee to the treasury authority
-- records solved block history
+- emits solved block history as canonical events
 - retargets difficulty
 - rotates stale blocks to preserve liveness
 
@@ -99,16 +100,17 @@ Delegated session state:
 - submission cap
 - active flag
 
-### `BlockHistory` PDA
+### Solved-block event trail
 
-One record per solved block:
+Accepted blocks are still traceable, but that history now lives in the protocol event stream instead of a rent-bearing PDA created for every solved block.
+
+The emitted solved-block data includes:
 
 - block number
 - winner
 - reward
 - nonce
 - hash
-- timestamp
 - challenge snapshot
 - difficulty snapshot
 
