@@ -1,5 +1,6 @@
 <p align="center">
-  <img src="miner-client/img/blockmine-logo-final.png" alt="Blockmine" width="360">
+  <img src="miner-client/img/logocircle.png" alt="Blockmine mark" width="56" valign="middle">
+  <img src="miner-client/img/blockmine-logo-final.png" alt="Blockmine" width="360" valign="middle">
 </p>
 
 <p align="center">
