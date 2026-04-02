@@ -1,23 +1,20 @@
 Blockmine Miner Windows Build
 
-Current packaged binary:
+Public binary:
 - dist/Blockmine Miner.exe
 
-Current public mainnet defaults:
+Mainnet defaults:
 - Program ID: FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv
 - Mint: 9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg
 
-How to rebuild:
+Rebuild:
 - powershell -ExecutionPolicy Bypass -File .\scripts\build-miner-exe.ps1
 
-What the packaged desktop miner includes:
-- branded executable icon
+The packaged desktop miner includes:
 - wallet manager
-- create/import wallet flows
+- wallet import by mnemonic or private key
 - QR-assisted manual funding
-- CPU, GPU, and hybrid mining modes
+- CPU, GPU, and hybrid mining
+- live protocol telemetry
 
-Important:
-- dist/ is a build artifact and is not meant to be committed
-- launch wallets, private keys, and runbooks do not belong in this repo
-- devnet rehearsal tooling exists elsewhere in the repo, but the packaged desktop client defaults to mainnet
+dist/ is a build artifact and should not be committed.

@@ -1,19 +1,13 @@
-# Blockmine Miner Packaging
+# Packaging
 
-This folder keeps platform-specific packaging flows while the actual source code stays shared in:
+The shared source of truth is:
 
 - `miner-client/`
 - `onchain/`
 
-That means:
-- Windows and macOS builds use the same Rust codebase
-- future miner changes should happen in `miner-client/`
-- packaging scripts in `packaging/windows` and `packaging/macos` only wrap build and distribution steps
+This folder only contains platform packaging wrappers.
 
-Current structure:
-- `windows/`: Windows build helpers that produce `dist/miner.exe`
-- `macos/`: macOS app and DMG packaging helpers
+- `windows/` builds the Windows desktop miner
+- `macos/` builds the macOS desktop miner
 
-Rule of thumb:
-- change product logic/UI once in `miner-client`
-- rebuild/package per platform from here
+Product logic belongs in `miner-client/`. Packaging scripts should not be used as the primary place to modify miner behavior.

@@ -1,119 +1,224 @@
-# Blockmine Protocol
+# Protocol
 
-## Goal
+This document describes the on-chain state machine implemented by the Blockmine program.
 
-Blockmine implements a proof-of-work block race on top of Solana.
+## Canonical accounts
 
-Miners compete off-chain for `BLOC`. Solana acts as the canonical state, settlement, and accounting layer.
+### `ProtocolConfig`
+
+Global configuration:
+
+- `admin`
+- `bloc_mint`
+- `reward_vault`
+- `treasury_authority`
+- `treasury_vault`
+- `max_supply`
+- `current_block_number`
+- `total_blocks_mined`
+- `total_rewards_distributed`
+- `total_treasury_fees_distributed`
+- difficulty, timing, and fee parameters
+
+The important distinction is:
+
+- `current_block_number` advances whenever the protocol opens a new logical block
+- `total_blocks_mined` advances only when a block is successfully settled
+
+Those counters may diverge whenever stale rotation occurs.
+
+### `CurrentBlock`
+
+The single mutable block in play:
+
+- `block_number`
+- `challenge`
+- `difficulty_bits`
+- `difficulty_target`
+- `block_reward`
+- `opened_at`
+- `expires_at`
+- `winner`
+- `winning_nonce`
+- `winning_hash`
+- `solved_at`
+
+### `MinerStats`
+
+One record per miner:
+
+- `total_submissions`
+- `valid_blocks_found`
+- `total_rewards_earned`
+- `last_submission_time`
+- `nickname`
+
+### `MiningSession`
+
+Optional delegated session keyed by canonical miner:
+
+- `miner`
+- `delegate`
+- `expires_at`
+- `max_submissions`
+- `submissions_used`
+- `active`
+
+## Initialization
+
+`initialize_protocol` accepts the mint, the reward vault, the treasury wallet, and the treasury ATA, then enforces a set of invariants.
+
+The important invariants are:
+
+- `treasury_fee_bps == 100`
+- `submit_fee_lamports == 10_000_000`
+- `max_supply == 20_000_000 * 10^9`
+- `initial_block_reward == Genesis reward`
+- `reward_vault.amount == TOTAL_PROTOCOL_EMISSIONS`
+- `reward_vault != treasury_vault`
+
+Genesis opens with:
+
+- `block_number = 0`
+- `status = OPEN`
+- `challenge = SHA256("blockmine-genesis" || admin || mint || slot || timestamp)`
+- `difficulty_target = target_from_difficulty_bits(initial_difficulty_bits)`
+- `block_reward = Genesis reward`
 
 ## Proof rule
 
-V1 uses:
+For a given `CurrentBlock`, the accepted proof is:
 
-`hash = SHA256(challenge || miner_pubkey || nonce)`
+```text
+H = SHA256(challenge || miner_pubkey || nonce_le_u64)
+```
 
-Validity rule:
+Acceptance rule:
 
-`hash < target`
+```text
+H < difficulty_target
+```
 
-Including the miner pubkey in the proof prevents the simplest form of nonce theft because a copied nonce will not validate for a different wallet.
+This rule is deterministic and miner-bound. Replaying the same nonce under another pubkey changes the preimage and therefore changes the hash.
 
-## Block lifecycle
+## Submit path
 
-1. the protocol opens one canonical logical block
-2. miners fetch the challenge, target, reward, and expiry
-3. hardware searches nonces off-chain
-4. a winner submits a valid solution
-5. the program verifies the hash and target
-6. the fixed `0.01 SOL` accepted-block fee is routed to the treasury authority
-7. the `BLOC` reward is split:
-   - `99%` to the miner
-   - `1%` to the treasury vault
-8. the solved-block event is emitted
-9. the next block is opened with a fresh challenge and target
+`submit_solution` and `submit_solution_with_session` both converge on the same settlement routine.
 
-If a block expires before a valid solve arrives, anyone can rotate the stale block and keep the protocol live.
+The program checks, in order:
 
-## Challenge rotation
+1. protocol is not paused
+2. block is open
+3. block is not expired
+4. reward state matches `total_blocks_mined`
+5. candidate hash satisfies the target
+6. reward vault holds enough BLOC
 
-The next challenge is derived from live settlement context, including:
+If the candidate is valid, settlement proceeds in this order:
 
-- previous winning hash
-- previous challenge
-- winner pubkey
-- winning nonce
-- next block number
-- slot and timestamp data
+1. transfer `submit_fee_lamports` to `treasury_authority`
+2. compute:
+   - `treasury_reward = gross_reward * treasury_fee_bps / 10000`
+   - `miner_reward = gross_reward - treasury_reward`
+3. transfer `miner_reward` from `reward_vault` to the miner ATA
+4. transfer `treasury_reward` from `reward_vault` to `treasury_vault`
+5. update `MinerStats`
+6. mark the block solved
+7. emit `BlockSolved`
+8. increment `total_blocks_mined`
+9. increment aggregate reward counters
+10. derive and open the next block
 
-This prevents cross-block replay because every logical block has a new challenge.
+If any step fails, the instruction aborts and the state transition is not partially committed.
 
-## Difficulty
+## Delegated sessions
 
-The protocol stores:
+Delegated sessions authorize one delegate wallet to submit on behalf of a canonical miner.
 
-- `difficulty_bits`
-- `difficulty_target`
+The delegated path still binds rewards and proof ownership to the canonical miner:
 
-`difficulty_bits` is a compact display value. The actual acceptance check uses the full `256-bit` target stored on-chain.
+- the proof uses `miner_pubkey`, not the delegate key
+- the miner ATA receives the BLOC reward
+- the delegate only pays fees and submits the transaction
 
-Retargeting happens on every solved block:
+This is the mechanism used for delegated mining flows without surrendering miner identity.
 
-- expected duration = configured target block time
-- observed duration = `solved_at - opened_at`
-- the full target is scaled
-- extreme outliers are clamped
-- min and max bounds are enforced
+## Next challenge
 
-This keeps the protocol responsive to changing hashrate without trusting any client-reported throughput.
+After a solved block, the next challenge is:
 
-## Reward model
+```text
+SHA256(
+  "blockmine-next" ||
+  winning_hash ||
+  previous_challenge ||
+  winner_pubkey ||
+  winning_nonce_le_u64 ||
+  next_block_number_le_u64 ||
+  slot_le_u64 ||
+  unix_timestamp_le_i64
+)
+```
 
-Blockmine does not use an infinite tail and does not use a simple binary halving schedule.
+The previous winning proof is therefore part of the next challenge seed.
 
-Instead, V1 uses a named era schedule over the `20,000,000 BLOC` mining allocation:
+## Difficulty retarget
 
-- Genesis
-- Aurum
-- Phoenix
-- Horizon
-- Quasar
-- Pulsar
-- Voidfall
-- Eclipse
-- Mythos
-- Paragon
-- Hyperion
-- Singularity
-- Eternal I
-- Eternal II
-- Scarcity
+Difficulty is stored as a full target and as a display bit count.
 
-Era progression advances on **successfully settled blocks**. Stale rotations do not burn scheduled emissions.
+The retarget routine:
 
-The final Scarcity tail is capped so the mining schedule stops exactly at `20,000,000 BLOC`.
+- measures the observed block duration
+- smooths the observation
+- clamps outliers
+- scales the full target
+- enforces bounds from `min_difficulty_bits` and `max_difficulty_bits`
 
-## Settlement guarantees
+The target is the canonical acceptance threshold. `difficulty_bits` is derived from the target and exists as a readable compression.
 
-The core V1 guarantees come from structure:
+## Stale rotation
 
-- one mutable current-block account
-- one canonical solved-block event trail
-- one reward vault owned by the program PDA
-- one canonical treasury route loaded from config
+If `block_ttl_sec` is enabled and a block expires unsolved, anyone may call `rotate_stale_block`.
 
-That means the contract is not a passive faucet. It is the state machine that defines:
+That path:
 
-- who won
-- what reward was due
-- where the treasury fee went
-- what block opens next
+- requires the current block to be open and expired
+- increments `current_block_number`
+- derives a fresh challenge
+- resets difficulty to `min_difficulty_bits`
+- preserves reward indexing by using `reward_era_for_open_block(total_blocks_mined)`
+- emits `BlockStaleRotated`
+- emits `BlockOpened`
 
-## Sessions
+Important consequence:
 
-The protocol also supports delegated mining sessions:
+- stale rotation advances the live block number
+- stale rotation does not advance emissions
 
-- a canonical miner can authorize a delegate wallet
-- the delegate submits solutions on behalf of the miner
-- limits can be set through expiry and submission cap
+This is why `current_block_number` can be greater than `total_blocks_mined`.
 
-This is useful for browser-to-desktop handoff and wallet-delegated mining flows, while keeping settlement tied to the canonical miner identity.
+## Event surface
+
+The program emits the canonical public trace of state transitions:
+
+- `ProtocolInitialized`
+- `BlockOpened`
+- `BlockSolved`
+- `DifficultyAdjusted`
+- `BlockStaleRotated`
+- `MinerRegistered`
+- `MiningSessionAuthorized`
+
+Accepted block history therefore exists in the event stream rather than as a rent-bearing PDA per solved block.
+
+## Monetary flow
+
+For each accepted block:
+
+- the miner pays `0.01 SOL`
+- the treasury wallet receives that `0.01 SOL`
+- the reward vault pays the gross BLOC reward
+- the treasury ATA receives `1%` of that BLOC reward
+- the miner ATA receives the remaining `99%`
+
+The reward vault is a pre-funded inventory account. The protocol does not mint per block.

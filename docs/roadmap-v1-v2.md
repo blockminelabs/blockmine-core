@@ -1,36 +1,31 @@
-# Roadmap V1 -> V2
+# Roadmap
 
-## V1 shipped
+## V1
 
-- Solana program with fixed-supply reward vault
-- live block challenge and on-chain settlement
-- CPU, GPU, and hybrid miner flows
-- Windows and macOS desktop client
-- local wallet manager inside the desktop miner
-- fixed `0.01 SOL` accepted-block fee
-- `1%` treasury cut in `BLOC`
-- launch LP and treasury reserve split outside the mining schedule
+V1 establishes the core machine:
 
-## Near-term hardening
+- one canonical on-chain block race
+- off-chain SHA-256 search
+- on-chain proof verification
+- dynamic difficulty on the full 256-bit target
+- fixed-supply reward-vault settlement
+- delegated mining sessions
+- Windows and macOS public miner
 
-- deployment immutability plan
-- admin surface reduction or removal
-- reproducible build and public verification flow
-- monitoring and distribution hardening for desktop binaries
+## Hardening targets
 
-## V2 candidates
-
-- richer indexer and live event surfaces
-- stronger anti-MEV or commit-reveal flow
-- deeper GPU tuning and multi-device hardening
-- pool support
-- signed desktop releases
-- richer public explorer and telemetry surfaces
-
-## Recommended V2 order
+The next technical steps are straightforward:
 
 1. immutable deployment posture
-2. reproducible verification flow
-3. deeper indexer and event surfaces
-4. GPU tuning and multi-device hardening
-5. pool support
+2. reproducible build verification
+3. signed desktop release pipeline
+4. richer event indexing and public explorer surfaces
+
+## V2 research
+
+V2 work, if pursued, naturally falls into four areas:
+
+- stronger anti-ordering or commit-reveal mechanisms
+- miner pool design
+- deeper multi-device orchestration
+- richer indexer-backed telemetry

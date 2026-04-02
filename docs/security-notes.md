@@ -1,70 +1,96 @@
 # Security Notes
 
-## Core protections in V1
+## Core invariants
 
-- the proof binds `challenge + miner_pubkey + nonce`
-- the reward vault is owned by the program PDA
-- accepted-block `SOL` fees are routed by the contract
-- the treasury `BLOC` cut is routed by the contract
-- one mutable current-block account serializes winner settlement
-- stale rotation preserves liveness
+The Blockmine runtime enforces the following invariants on-chain.
 
-## What is strongly enforced on-chain
+### Miner-bound proof
 
-### Proof ownership
+The accepted hash includes the miner public key in the preimage:
 
-Copying a nonce is not enough to steal a reward because the miner pubkey is part of the hashed preimage.
+```text
+SHA256(challenge || miner_pubkey || nonce_le_u64)
+```
 
-### Canonical reward routing
+Copying a nonce is therefore not sufficient to steal a reward under another wallet.
 
-The program reads:
+### One winner per block
 
-- canonical mint
-- canonical reward vault
-- canonical treasury authority
-- canonical treasury vault
+There is one writable `CurrentBlock`. Settlement transitions that account from open to solved. Solana account locking serializes competing winners on the same mutable state.
 
-from protocol config, then enforces those accounts during settlement.
+### Fee-before-reward ordering
 
-### Reward vault safety
+Accepted settlement transfers the fixed `0.01 SOL` submit fee before BLOC rewards are paid.
 
-The mining allocation sits in a PDA-controlled reward vault. Transfers from that vault require the program signer path.
+If the fee transfer fails, the instruction aborts and no reward transfer is committed.
 
-## Important operational assumptions
+### Canonical vault routing
 
-The launch still depends on correct operations around:
+The program reads the mint, reward vault, treasury wallet, and treasury ATA from `ProtocolConfig`, then enforces those addresses during settlement.
 
-- funding the reward vault with the full mining allocation
-- funding the treasury and LP allocations correctly
-- revoking mint authority after allocation
-- revoking freeze authority after allocation
-- deciding when to remove admin and upgrade authority
+### Pre-funded reward inventory
 
-These are launch and governance concerns, not automatic properties of the runtime alone.
+The mining allocation is not minted per block. Rewards are paid out of the reward vault that was funded at initialization.
 
-## Current V1 limitations
+### Emissions keyed to settled work
 
-### Ordering and mempool visibility
+Reward era progression is indexed by `total_blocks_mined`, not by raw block openings. Stale rotations therefore preserve scheduled emissions.
 
-Binding the miner pubkey blocks simple nonce theft, but it does not fully solve:
+## Accepted-block fee
+
+The accepted-block fee is fixed at `10_000_000` lamports, which is `0.01 SOL`.
+
+The initialization path enforces this fixed value. The runtime settlement path transfers it directly to the treasury wallet. A public miner cannot settle a winning block without executing that transfer.
+
+## Treasury split
+
+For each accepted reward:
+
+- `1%` of the BLOC reward is transferred to the treasury ATA
+- `99%` is transferred to the miner ATA
+- `0.01 SOL` is transferred to the treasury wallet
+
+The BLOC split is enforced by the program. The SOL fee is enforced by the program. Neither flow depends on a client-declared percentage.
+
+## Event audit trail
+
+The public history of settlement exists in the event stream:
+
+- `BlockOpened`
+- `BlockSolved`
+- `DifficultyAdjusted`
+- `BlockStaleRotated`
+
+`BlockSolved` includes enough information to reconstruct the solved block:
+
+- block number
+- winner
+- nonce
+- hash
+- challenge
+- difficulty bits
+- full difficulty target
+- gross reward
+- miner reward
+- treasury reward
+- submit fee
+
+## Explicit non-goals
+
+The protocol does not claim to solve all ordering and routing problems in a public mempool.
+
+Binding the miner pubkey to the proof prevents simple nonce theft. It does not mathematically eliminate:
 
 - validator ordering
 - censorship
-- more advanced MEV-style routing issues
+- generalized mempool games
 
-### Admin surface
+## Operational assumptions
 
-The codebase still contains admin instructions and an upgrade path. If a fully immutable posture is required, those controls must be removed or permanently disabled at the deployment layer.
+Three important properties depend on deployment posture rather than on the runtime alone:
 
-### Treasury model
+- treasury wallet custody
+- mint authority removal
+- upgrade authority removal
 
-The `BLOC` reward vault is program-controlled. The treasury authority remains an external wallet authority, which means treasury custody is operational rather than fully contract-locked.
-
-## Recommended end-state posture
-
-- mint authority revoked
-- freeze authority revoked
-- treasury routing fixed
-- admin controls removed or locked down
-- upgrade authority removed
-- reproducible and publicly verifiable build for the deployed program
+The reward vault itself is program-controlled. The treasury wallet remains an external wallet. That is a custody model, not a flaw in the reward vault logic.

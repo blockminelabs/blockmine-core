@@ -1,29 +1,29 @@
 # Miner Client
 
-## Purpose
+## Binaries
 
-The miner client is the public execution layer for Blockmine.
+The repository ships two public miner interfaces built from the same Rust codebase.
 
-It supports:
+- `blockmine-miner` - command-line interface
+- `blockmine-studio` - desktop client for Windows and macOS
 
-- CPU mining
-- GPU mining with OpenCL builds
-- hybrid CPU + GPU mining
-- protocol-state inspection
-- miner registration
-- test submission and debugging flows
-- desktop wallet management
+Both use the same:
 
-## Mainnet defaults
+- program ID
+- RPC read path
+- proof rule
+- submission flow
 
-Current public defaults in the core repo:
+## Public defaults
 
-- program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
-- RPC default: `https://api.mainnet-beta.solana.com`
+- Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
+- Default RPC: `https://api.mainnet-beta.solana.com`
 
-These defaults can always be overridden with CLI flags.
+These defaults can be overridden with CLI flags.
 
-## CLI commands
+## Command-line interface
+
+The CLI supports:
 
 - `protocol-state`
 - `register`
@@ -45,53 +45,83 @@ cargo run --manifest-path miner-client/Cargo.toml --bin blockmine-miner --featur
 cargo run --manifest-path miner-client/Cargo.toml --bin blockmine-miner --features opencl -- mine --backend gpu --gpu-platform 0 --gpu-device 0 --gpu-batch-size 1048576
 ```
 
+## Mining loop
+
+The miner loop is simple.
+
+1. Fetch the current block snapshot.
+2. Read `challenge`, `difficulty_target`, `block_reward`, and block status.
+3. Construct `challenge || miner_pubkey || nonce_le_u64`.
+4. Search nonce space on CPU, GPU, or both.
+5. Check candidate hashes against the current target.
+6. Build a settlement transaction only when a valid nonce is found.
+
+The miner does not stream every attempt to the chain. It only submits a candidate that already satisfies the target.
+
 ## Desktop client
 
-The desktop app is the main end-user miner for Windows and macOS.
+The desktop client adds:
 
-Current features:
-
-- wallet manager
+- local wallet manager
 - create new wallet
-- import from seed phrase
-- import from private key
-- remember the last selected wallet
-- manual funding with QR code
+- import by mnemonic
+- import by private key
+- remembered selected wallet
+- QR-assisted manual funding
+- live hashrate chart
 - CPU, GPU, and hybrid execution
-- live mining stats and hashrate chart
 
-The selected wallet is the wallet whose balances and mining state the app should display.
+The selected wallet is the active miner identity whose balances and mining state are displayed.
 
-## Wallet model
+## Wallet storage
 
-The miner stores local wallets under the Blockmine app storage directory on the user machine.
+Managed wallets live in the local Blockmine application data directory on the user's machine.
 
-The wallet manager is intentionally local-first:
+The client stores:
 
-- wallet keys stay on the machine
-- the app can create dedicated mining wallets
-- the app can import existing recovery phrases or private keys
-- the desktop app remembers the last selected wallet between launches
+- the wallet label
+- the key material
+- the selected-wallet preference
 
-Legacy desktop-session wallet files are migrated into the newer managed-wallet format automatically.
+Wallets are not derived from a shared global seed. Each created wallet is generated locally from fresh entropy on the host machine.
+
+## Funding and payout
+
+The miner wallet is responsible for:
+
+- the accepted-block `0.01 SOL` fee
+- standard Solana transaction fees
+- miner ATA creation if needed
+
+Accepted BLOC rewards are sent to the selected miner wallet ATA.
+
+## GPU execution
+
+GPU mode requires:
+
+- an OpenCL-enabled build
+- a working OpenCL runtime
+- correct platform and device selection
+
+The GPU path and the CPU path use the same proof rule and the same submit path. Only the nonce-search engine changes.
 
 ## Windows build
 
-The current packaged Windows binary is:
-
-- `dist/Blockmine Miner.exe`
-
-Packaging command:
+From the repository root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build-miner-exe.ps1
+powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-miner-exe.ps1
 ```
 
-The build script handles the branded icon and emits the final executable into `dist/`.
+Artifacts:
+
+- `dist/Blockmine Miner.exe`
+- `dist/start-blockmine-studio.bat`
+- `dist/README-blockmine-studio.txt`
 
 ## macOS build
 
-Use the packaging helper:
+From the repository root on a Mac:
 
 ```bash
 chmod +x packaging/macos/*.command
@@ -99,23 +129,7 @@ chmod +x packaging/macos/scripts/*.sh
 ./packaging/macos/build-macos.command
 ```
 
-Expected output:
+Artifacts:
 
 - `dist/Blockmine Miner.app`
-- optional `.dmg` output in `dist/`
-
-## GPU notes
-
-GPU mining requires:
-
-- an OpenCL-enabled build
-- a working OpenCL runtime on the host
-- correct platform and device selection
-
-The miner will fail clearly if GPU mode is selected without the required runtime support.
-
-## Dev and rehearsal tooling
-
-The repo still contains devnet and rehearsal helpers under `onchain/scripts/` and `miner-client/src/bin/devnet-admin.rs`.
-
-Those tools are for local testing and controlled rehearsals. They are not part of the normal public mining flow.
+- `dist/Blockmine Miner.dmg`

@@ -1,143 +1,117 @@
-# Blockmine Architecture
+# Architecture
 
-## Repository layout
+## Model
 
-- `onchain/`: Anchor workspace and Solana program
-- `miner-client/`: Rust miner CLI and desktop client
-- `docs/`: public technical notes for the core repo
-- `packaging/`: Windows and macOS packaging helpers
+Blockmine separates proof search from settlement.
 
-## System shape
+- search happens on local hardware
+- settlement happens on Solana
 
-Blockmine splits mining into two layers:
+The chain is used as a deterministic state machine. It does not waste compute units on brute-force work.
 
-- **off-chain search**
-  - miners fetch the live block snapshot
-  - CPU and GPU hardware iterate nonces
-  - only a winning solution is sent on-chain
-- **on-chain settlement**
-  - the program stores canonical protocol state
-- the program verifies the submitted proof
-- the program routes rewards and fees
-- the program opens the next logical block
-- the program emits a canonical solved-block event trail
+## Data flow
 
-This keeps brute-force hashing off-chain while preserving deterministic settlement on Solana.
+### 1. Read path
 
-## On-chain program
+The miner fetches:
 
-The Solana program does not mine. It owns the canonical state machine:
+- `ProtocolConfig`
+- `CurrentBlock`
+- the miner's `MinerStats`
 
-- stores protocol configuration
-- stores the currently open block
-- verifies `SHA256(challenge || miner_pubkey || nonce)`
-- compares the result against the live target
-- transfers miner and treasury rewards from the reward vault
-- transfers the fixed accepted-block `SOL` fee to the treasury authority
-- emits solved block history as canonical events
-- retargets difficulty
-- rotates stale blocks to preserve liveness
+These are normal RPC reads. The protocol does not need to be notified that a miner is hashing.
 
-Era progression advances on **successfully settled blocks**, not on raw block openings. A stale rotation does not burn scheduled emissions.
+### 2. Local search
 
-## Miner client
+The miner constructs the preimage:
 
-The Rust miner stack includes:
+```text
+challenge || miner_pubkey || nonce_le_u64
+```
 
-- CLI mining commands for CPU, GPU, and hybrid execution
-- protocol inspection commands
-- registration and test submission flows
-- a desktop app for Windows and macOS
-- local wallet management
-- QR-assisted manual funding for the desktop wallet
+and iterates nonces on CPU, GPU, or both. The search loop is entirely local.
 
-The desktop app and the CLI use the same RPC, signing, and submission path.
+### 3. Local validation
 
-## Account model
+When a candidate hash is found, the miner can compare it locally against the current 256-bit target before building a transaction.
 
-### `ProtocolConfig` PDA
+### 4. Submission
 
-Global protocol configuration:
+Only a winning candidate is sent to the chain. The transaction does not contain a large work trace. It contains the nonce and the accounts required for settlement.
 
-- admin authority
-- BLOC mint
-- reward vault
-- treasury authority and treasury vault
-- timing configuration
-- fee configuration
-- difficulty configuration
-- aggregate counters
+### 5. On-chain verification
 
-### `CurrentBlock` PDA
+The program recomputes the hash, compares it to the target, charges the accepted-block fee, routes BLOC rewards, records the winner, emits events, and opens the next block.
 
-Mutable live block state:
+## Program structure
 
-- block number
-- challenge
-- target
-- difficulty bits
-- reward
-- open and expiry timestamps
-- winner metadata
+### State
 
-### `MinerStats` PDA
+- `ProtocolConfig` - global constants and aggregate counters
+- `CurrentBlock` - the single live block
+- `MinerStats` - per-miner statistics
+- `MiningSession` - optional delegate authorization
 
-One PDA per miner:
+### Math
 
-- accepted submissions recorded on-chain
-- valid blocks found
-- total rewards earned
-- nickname
-- last submission time
+- `math/difficulty.rs` - full-target retarget logic
+- `math/rewards.rs` - era schedule and exact capped emissions
 
-### `MiningSession` PDA
+### Instructions
 
-Delegated session state:
+- `initialize_protocol`
+- `register_miner`
+- `update_nickname`
+- `submit_solution`
+- `authorize_mining_session`
+- `submit_solution_with_session`
+- `rotate_stale_block`
 
-- canonical miner
-- delegate
-- expiry
-- submission cap
-- active flag
+## Canonical public history
 
-### Solved-block event trail
+Accepted block history is recorded in events:
 
-Accepted blocks are still traceable, but that history now lives in the protocol event stream instead of a rent-bearing PDA created for every solved block.
+- `BlockOpened`
+- `BlockSolved`
+- `DifficultyAdjusted`
+- `BlockStaleRotated`
 
-The emitted solved-block data includes:
+This design keeps the public history readable without forcing a new rent-bearing account on every solved block.
 
-- block number
-- winner
-- reward
-- nonce
-- hash
-- challenge snapshot
-- difficulty snapshot
+## Wallet and reward flow
 
-## Token and vault flow
+The protocol uses three token destinations:
 
-Mainnet supply is fixed at `21,000,000 BLOC`:
+- reward vault - pre-funded mining inventory
+- miner ATA - beneficiary destination for accepted rewards
+- treasury ATA - protocol treasury share of accepted rewards
 
-- `20,000,000 BLOC` in the reward vault
-- `450,000 BLOC` in the treasury vault
-- `550,000 BLOC` held separately for LP provisioning
+The SOL submit fee is routed to the treasury wallet, not to the reward vault.
 
-The reward schedule only applies to the `20,000,000 BLOC` mining allocation.
+## Desktop miner
 
-## Deployment posture
+The desktop client is a thin execution layer on top of the same protocol.
 
-This public repo is meant to describe the open technical core.
+It manages:
 
-Operational items stay outside the repo:
+- local wallets
+- CPU and GPU device selection
+- mining mode selection
+- telemetry rendering
+- submission to the canonical program
 
-- launch wallet bundles
-- private runbooks
-- SSH material
-- production server secrets
+The desktop client does not maintain its own private accounting system. It reads on-chain state and submits transactions against the same public program.
 
-Mainnet hardening remains a deployment concern on top of this codebase:
+## Emission indexing
 
-- revoke mint authority after allocation
-- revoke freeze authority
-- remove upgrade authority
-- remove or lock down admin controls if an immutable posture is required
+Two counters matter:
+
+- `current_block_number`
+- `total_blocks_mined`
+
+They are not the same quantity.
+
+- `current_block_number` tracks the current logical tip
+- `total_blocks_mined` tracks successfully settled blocks only
+
+The reward schedule is indexed by `total_blocks_mined`. Stale rotations therefore preserve emissions instead of silently burning them.
