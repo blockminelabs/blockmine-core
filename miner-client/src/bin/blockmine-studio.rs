@@ -2163,9 +2163,11 @@ impl App for BlockMineStudioApp {
                                                 ui.horizontal(|ui| {
                                                     ui.vertical(|ui| {
                                                         ui.label(
-                                                            RichText::new(format_wallet_source_label(&wallet))
-                                                                .strong()
-                                                                .color(theme_text()),
+                                                            RichText::new(
+                                                                format_wallet_display_label(&wallet),
+                                                            )
+                                                            .strong()
+                                                            .color(theme_text()),
                                                         );
                                                         ui.add_space(4.0);
                                                         ui.label(
@@ -2864,17 +2866,19 @@ fn wallet_preview_labels(
     ))
 }
 
-fn format_era_progress(row: EraScheduleRow, current_block_number: u64) -> String {
-    let mined_lamports = era_mined_lamports(row.era, current_block_number);
+fn format_era_progress(row: EraScheduleRow, protocol_blocks_mined: u64) -> String {
+    let gross_mined_lamports = era_mined_lamports(row.era, protocol_blocks_mined);
+    let mined_lamports = gross_mined_lamports
+        .saturating_sub(gross_mined_lamports.saturating_div(100));
     format!(
         "{} / {} BLOC mined",
         format_bloc_trimmed(mined_lamports),
-        row.era_emissions
+        format_bloc_trimmed(era_total_miner_lamports(row.era))
     )
 }
 
-fn era_mined_lamports(era: u8, current_block_number: u64) -> u64 {
-    let completed_blocks = current_block_number;
+fn era_mined_lamports(era: u8, protocol_blocks_mined: u64) -> u64 {
+    let completed_blocks = protocol_blocks_mined;
     match era {
         0 => era_linear_progress(completed_blocks, 0, 10_000, 21_000_000_000),
         1 => era_linear_progress(completed_blocks, 10_000, 100_000, 12_000_000_000),
@@ -2893,6 +2897,28 @@ fn era_mined_lamports(era: u8, current_block_number: u64) -> u64 {
         14 => scarcity_progress(completed_blocks),
         _ => 0,
     }
+}
+
+fn era_total_miner_lamports(era: u8) -> u64 {
+    let gross = match era {
+        0 => 10_000u64.saturating_mul(21_000_000_000),
+        1 => 90_000u64.saturating_mul(12_000_000_000),
+        2 => 200_000u64.saturating_mul(7_000_000_000),
+        3 => 300_000u64.saturating_mul(5_000_000_000),
+        4 => 400_000u64.saturating_mul(3_800_000_000),
+        5 => 500_000u64.saturating_mul(3_000_000_000),
+        6 => 600_000u64.saturating_mul(2_300_000_000),
+        7 => 900_000u64.saturating_mul(1_800_000_000),
+        8 => 1_200_000u64.saturating_mul(1_400_000_000),
+        9 => 1_600_000u64.saturating_mul(1_100_000_000),
+        10 => 1_700_000u64.saturating_mul(900_000_000),
+        11 => 2_000_000u64.saturating_mul(700_000_000),
+        12 => 2_500_000u64.saturating_mul(500_000_000),
+        13 => 4_000_000u64.saturating_mul(300_000_000),
+        14 => 970_000u64.saturating_mul(1_000_000_000),
+        _ => 0,
+    };
+    gross.saturating_sub(gross.saturating_div(100))
 }
 
 fn era_linear_progress(
@@ -3388,7 +3414,7 @@ fn render_wallet_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
             .show(ui, |ui| {
                 labeled_value(ui, "Desktop wallet", desktop_wallet_address);
                 if let Some(wallet) = app.active_wallet.as_ref() {
-                    labeled_value(ui, "Wallet type", format_wallet_source_label(wallet));
+                    labeled_value(ui, "Wallet label", format_wallet_display_label(wallet));
                 }
                 labeled_value(
                     ui,
@@ -4404,6 +4430,28 @@ fn format_wallet_source_label(wallet: &ManagedWallet) -> &'static str {
         WalletSource::ImportedSecret => "Imported private key",
         WalletSource::ImportedSeedPhrase => "Imported seed phrase",
     }
+}
+
+fn format_wallet_display_label(wallet: &ManagedWallet) -> String {
+    if wallet.source == WalletSource::SessionDelegate {
+        return "Desktop wallet".to_string();
+    }
+
+    if let Some(file_stem) = wallet
+        .keypair_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+    {
+        let suffix = format!("-{}", wallet.pubkey);
+        if let Some(label) = file_stem.strip_suffix(&suffix) {
+            let trimmed = label.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+    }
+
+    format_wallet_source_label(wallet).to_string()
 }
 
 fn device_selection_key(device: &GpuDeviceInfo) -> String {
