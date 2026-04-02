@@ -1848,7 +1848,7 @@ impl App for BlockMineStudioApp {
                                             }
                                         });
                                     } else {
-                                        let qr_payload = format!("solana:{wallet_address}");
+                                        let qr_payload = wallet_address.clone();
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.label(
@@ -3665,11 +3665,28 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                 "Reward / block",
                 format!("{} BLOC", format_bloc(app.latest_snapshot.current_reward)),
             );
-            metric(
-                &mut cols[1],
-                "Blocks mined",
-                protocol_blocks_mined.to_string(),
-            );
+            cols[1].group(|ui| {
+                ui.set_min_height(72.0);
+                ui.label(RichText::new("Leaderboard").size(12.0).color(theme_accent()));
+                ui.add_space(4.0);
+                let leaderboard_url = derive_site_origin(&app.browser_mine_url)
+                    .map(|origin| format!("{origin}/leaderboard"))
+                    .unwrap_or_else(|| "https://blockmine.dev/leaderboard".to_string());
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("Open leaderboard").color(theme_button_text()),
+                        )
+                        .fill(theme_accent())
+                        .min_size(egui::vec2(180.0, 34.0)),
+                    )
+                    .clicked()
+                {
+                    if let Err(error) = open_in_default_browser(&leaderboard_url) {
+                        app.error = Some(format!("Failed to open leaderboard: {error}"));
+                    }
+                }
+            });
         });
     });
 }
