@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 
 use crate::cli::Cli;
+use crate::rpc::normalize_raw_rpc_url;
 
 #[derive(Debug, Clone)]
 pub struct CliConfig {
@@ -19,7 +20,7 @@ impl CliConfig {
             .context("invalid program id")?;
 
         Ok(Self {
-            rpc_url: cli.rpc.clone(),
+            rpc_url: normalize_raw_rpc_url(&cli.rpc),
             program_id,
             keypair_path: cli.keypair.clone(),
             commitment: CommitmentConfig::confirmed(),

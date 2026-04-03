@@ -18,7 +18,7 @@ use blockmine_miner::miner_loop::GpuDeviceSelection;
 use blockmine_miner::mining_service::{
     MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate,
 };
-use blockmine_miner::rpc::{RpcFacade, PUBLICNODE_RPC_URL};
+use blockmine_miner::rpc::{normalize_raw_rpc_url, RpcFacade, PUBLICNODE_RPC_URL};
 use blockmine_miner::session_wallet::{
     load_managed_wallet_balances, load_managed_wallets_balances,
     sweep_single_session_delegate_wallet, SessionBalanceSummary, SessionSweepSummary,
@@ -608,13 +608,7 @@ impl BlockMineStudioApp {
         let mut app = Self {
             rpc_url: preferences
                 .as_ref()
-                .map(|prefs| {
-                    if prefs.rpc_url.trim().is_empty() {
-                        DEFAULT_RPC_URL.to_string()
-                    } else {
-                        prefs.rpc_url.clone()
-                    }
-                })
+                .map(|prefs| normalize_raw_rpc_url(&prefs.rpc_url))
                 .unwrap_or_else(|| DEFAULT_RPC_URL.to_string()),
             program_id: DEFAULT_PROGRAM_ID.to_string(),
             browser_mine_url: DEFAULT_BROWSER_MINE_URL.to_string(),
@@ -1066,7 +1060,7 @@ impl BlockMineStudioApp {
             return;
         }
 
-        let rpc_url = self.rpc_url.trim().to_string();
+        let rpc_url = normalize_raw_rpc_url(&self.rpc_url);
         let program_id = match self.program_id.trim().parse::<Pubkey>() {
             Ok(program_id) => program_id,
             Err(error) => {
@@ -1102,7 +1096,7 @@ impl BlockMineStudioApp {
             return;
         };
 
-        let rpc_url = self.rpc_url.trim().to_string();
+        let rpc_url = normalize_raw_rpc_url(&self.rpc_url);
         let program_id = match self.program_id.trim().parse::<Pubkey>() {
             Ok(program_id) => program_id,
             Err(error) => {
@@ -1126,7 +1120,7 @@ impl BlockMineStudioApp {
             return;
         }
 
-        let rpc_url = self.rpc_url.trim().to_string();
+        let rpc_url = normalize_raw_rpc_url(&self.rpc_url);
         let program_id = match self.program_id.trim().parse::<Pubkey>() {
             Ok(program_id) => program_id,
             Err(error) => {
@@ -1219,19 +1213,24 @@ impl BlockMineStudioApp {
     }
 
     fn apply_rpc_change(&mut self) {
-        if self.rpc_url.trim().is_empty() {
-            self.rpc_url = DEFAULT_RPC_URL.to_string();
-        }
+        let requested_rpc = self.rpc_url.trim().to_string();
+        let normalized_rpc = normalize_raw_rpc_url(&requested_rpc);
+        self.rpc_url = normalized_rpc.clone();
         self.persist_ui_preferences();
         self.trigger_rpc_refresh();
         self.error = None;
-        if self.mining_handle.is_some() {
+        if requested_rpc != normalized_rpc {
+            self.status = format!(
+                "The relay URL is automatic. Raw RPC reset to {}.",
+                normalized_rpc
+            );
+        } else if self.mining_handle.is_some() {
             self.status = format!(
                 "Raw RPC updated to {}. Stop and restart mining to move the live worker.",
-                self.rpc_url.trim()
+                normalized_rpc
             );
         } else {
-            self.status = format!("Raw RPC updated to {}.", self.rpc_url.trim());
+            self.status = format!("Raw RPC updated to {}.", normalized_rpc);
         }
     }
 
@@ -1397,7 +1396,7 @@ impl BlockMineStudioApp {
             .with_context(|| format!("invalid program id: {}", self.program_id))?;
 
         Ok(CliConfig {
-            rpc_url: self.rpc_url.trim().to_string(),
+            rpc_url: normalize_raw_rpc_url(&self.rpc_url),
             program_id,
             keypair_path,
             commitment: CommitmentConfig::confirmed(),
@@ -3595,7 +3594,7 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                     .rounding(egui::Rounding::same(16.0))
                     .inner_margin(egui::Margin::same(14.0))
                     .show(ui, |ui| {
-                        ui.label(RichText::new("RPC endpoint").color(theme_accent()));
+                        ui.label(RichText::new("Raw Solana RPC").color(theme_accent()));
                         ui.add_space(6.0);
                         ui.add(
                             TextEdit::singleline(&mut app.rpc_url)
@@ -3619,14 +3618,14 @@ fn render_miner_controls_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
                                 app.error = None;
                                 app.status = format!(
                                     "Refreshing relay state and wallet balances via {}.",
-                                    app.rpc_url.trim()
+                                    normalize_raw_rpc_url(&app.rpc_url)
                                 );
                             }
                         });
                         ui.add_space(4.0);
                         ui.label(
                             RichText::new(
-                                "Protocol state is read from the Blockmine relay. This RPC is used for balances and transactions, and the value above is what Start mining will use.",
+                                "Protocol state is read from the Blockmine relay automatically. This field is only for the raw Solana RPC used for balances and transactions, and Start mining will use the value shown above.",
                             )
                             .size(11.0)
                             .color(theme_muted()),

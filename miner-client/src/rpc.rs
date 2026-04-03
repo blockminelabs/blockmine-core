@@ -25,6 +25,22 @@ use crate::config::CliConfig;
 pub const PUBLICNODE_RPC_URL: &str = "https://solana-rpc.publicnode.com";
 pub const MINER_STATE_RELAY_URL: &str = "https://blockmine.dev/api/miner/state";
 
+pub fn is_miner_state_relay_url(value: &str) -> bool {
+    let normalized = value.trim().trim_end_matches('/').to_ascii_lowercase();
+    normalized == MINER_STATE_RELAY_URL
+        || normalized.ends_with("/api/miner/state")
+        || normalized == "https://blockmine.dev/api/miner/state"
+}
+
+pub fn normalize_raw_rpc_url(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || is_miner_state_relay_url(trimmed) {
+        PUBLICNODE_RPC_URL.to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 pub struct RpcFacade {
     client: RpcClient,
     relay_client: Client,
@@ -125,12 +141,12 @@ struct RelayCurrentBlock {
 
 impl RpcFacade {
     pub fn new(config: &CliConfig) -> Self {
-        Self::from_parts(&config.rpc_url, config.program_id, config.commitment)
+        Self::from_parts(&normalize_raw_rpc_url(&config.rpc_url), config.program_id, config.commitment)
     }
 
     pub fn from_parts(rpc_url: &str, program_id: Pubkey, commitment: CommitmentConfig) -> Self {
         Self {
-            client: RpcClient::new_with_commitment(rpc_url.to_string(), commitment),
+            client: RpcClient::new_with_commitment(normalize_raw_rpc_url(rpc_url), commitment),
             relay_client: Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
