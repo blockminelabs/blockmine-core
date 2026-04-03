@@ -14,9 +14,15 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 
 LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
 LOG_FILE="${LOG_DIR}/blockmine-vast-worker.log"
+BOOTSTRAP_LOG_FILE="${LOG_DIR}/bootstrap.log"
 PROFILE_FILE="/etc/profile.d/blockmine-vast.sh"
 
 mkdir -p "${BLOCKMINE_STORAGE_DIR}" "${LOG_DIR}" /workspace
+touch "${BOOTSTRAP_LOG_FILE}"
+if [ -z "${BLOCKMINE_BOOTSTRAP_LOGGING:-}" ]; then
+  export BLOCKMINE_BOOTSTRAP_LOGGING=1
+  exec > >(tee -a "${BOOTSTRAP_LOG_FILE}") 2>&1
+fi
 env | grep _ >> /etc/environment || true
 
 cat >"${PROFILE_FILE}" <<EOF
@@ -87,6 +93,7 @@ echo "[blockmine] open a Jupyter or SSH terminal."
 echo "[blockmine] the Blockmine console will launch automatically."
 echo "[blockmine] if it does not, run:"
 echo "[blockmine]   ${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-console"
+echo "[blockmine] bootstrap log: ${BOOTSTRAP_LOG_FILE}"
 echo "[blockmine] logs (headless mode only): ${LOG_FILE}"
 
 if [ "${BLOCKMINE_HEADLESS_AUTOSTART}" = "1" ]; then

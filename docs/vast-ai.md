@@ -45,6 +45,12 @@ Recommended public on-start command:
 bash -lc "$(curl -fsSL https://raw.githubusercontent.com/blockminelabs/blockmine-core/main/packaging/vastai/scripts/bootstrap-vast.sh)"
 ```
 
+To watch the bootstrap progress from the terminal:
+
+```bash
+tail -f /workspace/blockmine-logs/bootstrap.log
+```
+
 ## First boot
 
 On first boot the container creates a dedicated worker wallet if one does not already exist in the instance storage directory.

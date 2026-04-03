@@ -20,6 +20,9 @@ if [[ \$- == *i* ]] && [ -t 1 ] && [ -z "\${BLOCKMINE_VAST_CONSOLE_RUNNING:-}" ]
   if [ -f /etc/profile.d/blockmine-vast.sh ]; then
     . /etc/profile.d/blockmine-vast.sh
   fi
+  if [ -f /etc/profile.d/blockmine-opencl.sh ]; then
+    . /etc/profile.d/blockmine-opencl.sh
+  fi
   if command -v ${CONSOLE_COMMAND} >/dev/null 2>&1; then
     ${CONSOLE_COMMAND} || true
     echo
