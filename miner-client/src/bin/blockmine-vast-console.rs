@@ -516,15 +516,20 @@ impl VastConsole {
                     SetAttribute(Attribute::Bold),
                     Print(trim_line(line, width)),
                     SetAttribute(Attribute::Reset),
-                    Print("\n")
+                    Print("\r\n")
                 )?;
             } else {
-                queue!(self.stdout, Print(trim_line(line, width)), Print("\n"))?;
+                queue!(self.stdout, Print(trim_line(line, width)), Print("\r\n"))?;
             }
         }
 
         if !self.wallet_is_funded() {
-            queue!(self.stdout, Print("\n"), Print(trim_line(&deposit_line, width)), Print("\n"))?;
+            queue!(
+                self.stdout,
+                Print("\r\n"),
+                Print(trim_line(&deposit_line, width)),
+                Print("\r\n")
+            )?;
         }
 
         self.stdout.flush()?;
