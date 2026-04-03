@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS build
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/root/.cargo/bin:${PATH}
@@ -33,7 +33,7 @@ RUN cargo build --release \
     --bin blockmine-vast-worker \
     --bin blockmine-vast-console
 
-FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.0-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV BLOCKMINE_STORAGE_DIR=/workspace/blockmine-data

@@ -11,6 +11,7 @@ LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
 LOG_FILE="${LOG_DIR}/blockmine-vast-worker.log"
 
 mkdir -p "${BLOCKMINE_STORAGE_DIR}" "${LOG_DIR}"
+env | grep _ >> /etc/environment || true
 
 echo "[blockmine] preparing worker wallet"
 blockmine-wallet ensure

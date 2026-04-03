@@ -44,7 +44,9 @@ If a prebuilt image is not yet published, the public Vast template can use an Ub
 
 Recommended public base image:
 
-- `nvidia/cuda:12.4.1-devel-ubuntu22.04`
+- `nvidia/cuda:12.8.0-devel-ubuntu22.04`
+
+Use CUDA 12.8 for public Vast templates. That is the compatibility floor for RTX 5000-series / Blackwell inventory on Vast.
 
 Recommended on-start command:
 
@@ -60,3 +62,9 @@ That path:
 - builds `blockmine-wallet`, `blockmine-vast-console`, and `blockmine-vast-worker`
 - installs the interactive auto-console flow
 - keeps the same wallet under `/workspace/blockmine-data`
+
+Important:
+
+- the current Linux GPU miner still uses OpenCL
+- the template therefore needs both the NVIDIA runtime and a usable OpenCL platform in the container
+- the console will stay live and report the mismatch if `nvidia-smi` works but no OpenCL device is exposed

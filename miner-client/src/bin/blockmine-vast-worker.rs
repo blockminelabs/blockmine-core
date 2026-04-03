@@ -11,6 +11,7 @@ use blockmine_miner::engine::BackendMode;
 use blockmine_miner::miner_loop::GpuDeviceSelection;
 use blockmine_miner::mining_service::{MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate};
 use blockmine_miner::rpc::RpcFacade;
+use blockmine_miner::rig_probe::{detect_nvidia_devices, summarize_nvidia_devices};
 use blockmine_miner::ui::format_bloc;
 use blockmine_miner::vast_wallet::{ensure_vast_worker_wallet, worker_wallet_backup_acknowledged};
 use blockmine_miner::wallet_store::load_managed_keypair;
@@ -35,6 +36,10 @@ struct Cli {
     leaderboard_ingest_url: Option<String>,
     #[arg(long, env = "BLOCKMINE_WORKER_LABEL", default_value = "vast-worker")]
     worker_label: String,
+    #[arg(long, env = "BLOCKMINE_PLATFORM_DETAIL", default_value = "Mining Rig - Vast.ai")]
+    platform_detail: String,
+    #[arg(long, env = "BLOCKMINE_HARDWARE_SUMMARY")]
+    hardware_summary: Option<String>,
     #[arg(long, value_enum, env = "BLOCKMINE_BACKEND", default_value_t = BackendMode::Gpu)]
     backend: BackendMode,
     #[arg(long, env = "BLOCKMINE_BATCH_SIZE", default_value_t = 250_000)]
@@ -77,6 +82,12 @@ fn main() -> Result<()> {
 
     let signer = load_managed_keypair(&wallet)?;
     let gpu_devices = parse_gpu_devices(&cli.gpu_devices)?;
+    let detected_nvidia_devices = detect_nvidia_devices();
+    let hardware_summary = cli
+        .hardware_summary
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| summarize_nvidia_devices(&detected_nvidia_devices));
     let ingest_url = cli
         .leaderboard_ingest_url
         .clone()
@@ -89,6 +100,9 @@ fn main() -> Result<()> {
             .as_deref()
             .unwrap_or("disabled")
     );
+    if !hardware_summary.is_empty() {
+        println!("Hardware      : {}", hardware_summary);
+    }
     println!();
 
     let handle = MiningHandle::start(
@@ -107,6 +121,8 @@ fn main() -> Result<()> {
             start_nonce: None,
             miner_override: None,
             leaderboard_ingest_url: ingest_url,
+            platform_detail: Some(cli.platform_detail.clone()),
+            hardware_summary: Some(hardware_summary),
         },
     )?;
 

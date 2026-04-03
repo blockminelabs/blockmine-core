@@ -6,6 +6,7 @@ pub mod hashing;
 pub mod miner_loop;
 pub mod mining_service;
 pub mod rpc;
+pub mod rig_probe;
 pub mod session_wallet;
 pub mod submitter;
 pub mod ui;

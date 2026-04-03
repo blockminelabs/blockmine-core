@@ -15,6 +15,7 @@ LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
 LOG_FILE="${LOG_DIR}/blockmine-vast-worker.log"
 
 mkdir -p "${BLOCKMINE_STORAGE_DIR}" "${LOG_DIR}" /workspace
+env | grep _ >> /etc/environment || true
 
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "[blockmine] apt-get not found; use the Ubuntu CUDA base image for this template." >&2

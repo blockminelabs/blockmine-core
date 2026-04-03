@@ -1424,6 +1424,8 @@ impl BlockMineStudioApp {
             start_nonce: None,
             miner_override,
             leaderboard_ingest_url: derive_leaderboard_ingest_url(&self.browser_mine_url),
+            platform_detail: None,
+            hardware_summary: None,
         })
     }
 

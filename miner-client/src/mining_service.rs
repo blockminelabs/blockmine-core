@@ -59,6 +59,8 @@ pub struct MiningRuntimeOptions {
     pub start_nonce: Option<u64>,
     pub miner_override: Option<Pubkey>,
     pub leaderboard_ingest_url: Option<String>,
+    pub platform_detail: Option<String>,
+    pub hardware_summary: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +137,10 @@ struct LeaderboardHeartbeatPayload {
     reporter: String,
     backend: String,
     platform: String,
+    #[serde(rename = "platformDetail")]
+    platform_detail: String,
+    #[serde(rename = "hardwareSummary")]
+    hardware_summary: String,
     #[serde(rename = "hashrateHps")]
     hashrate_hps: u64,
     #[serde(rename = "sessionTokensMined")]
@@ -159,6 +165,8 @@ struct LeaderboardReporter {
     last_sent_at: Option<Instant>,
     miner_pubkey: Pubkey,
     reporter_pubkey: Pubkey,
+    platform_detail: String,
+    hardware_summary: String,
 }
 
 impl LeaderboardReporter {
@@ -166,6 +174,8 @@ impl LeaderboardReporter {
         ingest_url: Option<String>,
         miner_pubkey: Pubkey,
         reporter_pubkey: Pubkey,
+        platform_detail: Option<String>,
+        hardware_summary: Option<String>,
     ) -> Result<Self> {
         let trimmed_url = ingest_url.and_then(|value| {
             let trimmed = value.trim().to_string();
@@ -192,6 +202,8 @@ impl LeaderboardReporter {
             last_sent_at: None,
             miner_pubkey,
             reporter_pubkey,
+            platform_detail: sanitize_metadata_label(platform_detail),
+            hardware_summary: sanitize_metadata_label(hardware_summary),
         })
     }
 
@@ -208,8 +220,13 @@ impl LeaderboardReporter {
             return;
         }
 
-        let payload =
-            build_leaderboard_heartbeat_payload(self.miner_pubkey, self.reporter_pubkey, snapshot);
+        let payload = build_leaderboard_heartbeat_payload(
+            self.miner_pubkey,
+            self.reporter_pubkey,
+            snapshot,
+            &self.platform_detail,
+            &self.hardware_summary,
+        );
         let message = build_leaderboard_heartbeat_message(&payload);
         let signature_hex = hex::encode(signer.sign_message(message.as_bytes()).as_ref());
         let signed_payload = LeaderboardHeartbeatPayload {
@@ -331,6 +348,8 @@ fn worker_loop(
         options.leaderboard_ingest_url.clone(),
         miner_pubkey,
         signer.pubkey(),
+        options.platform_detail.clone(),
+        options.hardware_summary.clone(),
     )?;
     state.emit(sender, latest_snapshot);
     leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
@@ -745,12 +764,16 @@ fn build_leaderboard_heartbeat_payload(
     miner_pubkey: Pubkey,
     reporter_pubkey: Pubkey,
     snapshot: &MiningSnapshot,
+    platform_detail: &str,
+    hardware_summary: &str,
 ) -> LeaderboardHeartbeatPayload {
     LeaderboardHeartbeatPayload {
         miner: miner_pubkey.to_string(),
         reporter: reporter_pubkey.to_string(),
         backend: backend_label(snapshot.backend).to_string(),
         platform: LEADERBOARD_PLATFORM_LABEL.to_string(),
+        platform_detail: platform_detail.to_string(),
+        hardware_summary: hardware_summary.to_string(),
         hashrate_hps: snapshot.last_hashrate_hps.max(0.0).round() as u64,
         session_tokens_mined: snapshot.session_tokens_mined.to_string(),
         session_blocks_mined: snapshot.session_blocks_mined,
@@ -764,11 +787,13 @@ fn build_leaderboard_heartbeat_payload(
 
 fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
     [
-        "v2".to_string(),
+        "v3".to_string(),
         payload.miner.clone(),
         payload.reporter.clone(),
         payload.backend.clone(),
         payload.platform.clone(),
+        payload.platform_detail.clone(),
+        payload.hardware_summary.clone(),
         payload.hashrate_hps.to_string(),
         payload.session_tokens_mined.clone(),
         payload.session_blocks_mined.to_string(),
@@ -778,6 +803,20 @@ fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) ->
         payload.updated_at.to_string(),
     ]
     .join("|")
+}
+
+fn sanitize_metadata_label(value: Option<String>) -> String {
+    value
+        .unwrap_or_default()
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(120)
+        .collect()
 }
 
 fn backend_label(mode: BackendMode) -> &'static str {

@@ -1,5 +1,4 @@
 use std::io::{self, stdout, Stdout, Write};
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -8,6 +7,7 @@ use blockmine_miner::engine::{gpu, BackendMode};
 use blockmine_miner::miner_loop::GpuDeviceSelection;
 use blockmine_miner::mining_service::{MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate};
 use blockmine_miner::rpc::RpcFacade;
+use blockmine_miner::rig_probe::{detect_nvidia_devices, summarize_nvidia_devices};
 use blockmine_miner::session_wallet::{load_managed_wallet_balances, sweep_single_session_delegate_wallet};
 use blockmine_miner::ui::{format_bloc, format_u64};
 use blockmine_miner::vast_wallet::{
@@ -47,6 +47,10 @@ struct Cli {
     leaderboard_ingest_url: Option<String>,
     #[arg(long, env = "BLOCKMINE_WORKER_LABEL", default_value = "vast-worker")]
     worker_label: String,
+    #[arg(long, env = "BLOCKMINE_PLATFORM_DETAIL", default_value = "Mining Rig - Vast.ai")]
+    platform_detail: String,
+    #[arg(long, env = "BLOCKMINE_HARDWARE_SUMMARY")]
+    hardware_summary: Option<String>,
     #[arg(long, value_enum, env = "BLOCKMINE_BACKEND", default_value_t = BackendMode::Gpu)]
     backend: BackendMode,
     #[arg(long, env = "BLOCKMINE_BATCH_SIZE", default_value_t = 250_000)]
@@ -159,6 +163,7 @@ struct VastConsole {
     wallet_blocks_mined: u64,
     wallet_tokens_mined: u64,
     nvidia_devices: Vec<String>,
+    hardware_summary: String,
     opencl_devices: Vec<String>,
     gpu_status: String,
     last_message: String,
@@ -172,6 +177,11 @@ impl VastConsole {
         let config = cli_config(&cli.rpc, &cli.program_id)?;
         let rpc = RpcFacade::new(&config);
         let (nvidia_devices, opencl_devices, gpu_status) = detect_gpu_environment();
+        let hardware_summary = cli
+            .hardware_summary
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| summarize_nvidia_devices(&nvidia_devices));
 
         Ok(Self {
             cli,
@@ -194,6 +204,7 @@ impl VastConsole {
             wallet_blocks_mined: 0,
             wallet_tokens_mined: 0,
             nvidia_devices,
+            hardware_summary,
             opencl_devices,
             gpu_status,
             last_message: "Waiting for wallet funding.".to_string(),
@@ -335,6 +346,8 @@ impl VastConsole {
                 start_nonce: None,
                 miner_override: None,
                 leaderboard_ingest_url: ingest_url,
+                platform_detail: Some(self.cli.platform_detail.clone()),
+                hardware_summary: Some(self.hardware_summary.clone()),
             },
         )?;
 
@@ -451,6 +464,7 @@ impl VastConsole {
             SetAttribute(Attribute::Bold),
             Print("Detected GPUs\n"),
             SetAttribute(Attribute::Reset),
+            Print(format!("Rig summary    : {}\n", if self.hardware_summary.is_empty() { "-".to_string() } else { self.hardware_summary.clone() })),
             Print("NVIDIA runtime\n"),
         )?;
 
@@ -500,6 +514,14 @@ impl VastConsole {
     fn refresh_gpu_details(&mut self) {
         let (nvidia_devices, opencl_devices, gpu_status) = detect_gpu_environment();
         self.nvidia_devices = nvidia_devices;
+        if self
+            .cli
+            .hardware_summary
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            self.hardware_summary = summarize_nvidia_devices(&self.nvidia_devices);
+        }
         self.opencl_devices = opencl_devices;
         self.gpu_status = gpu_status;
     }
@@ -627,29 +649,6 @@ fn detect_gpu_environment() -> (Vec<String>, Vec<String>, String) {
     };
 
     (nvidia_devices, opencl_devices, gpu_status)
-}
-
-fn detect_nvidia_devices() -> Vec<String> {
-    let output = Command::new("nvidia-smi")
-        .args([
-            "--query-gpu=index,name",
-            "--format=csv,noheader",
-        ])
-        .output();
-
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.to_string())
-        .collect()
 }
 
 fn parse_gpu_devices(values: &[String]) -> Result<Vec<GpuDeviceSelection>> {

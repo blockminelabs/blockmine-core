@@ -35,7 +35,9 @@ The public bootstrap path exists so the template can be used immediately even be
 
 Recommended public bootstrap image:
 
-- `nvidia/cuda:12.4.1-devel-ubuntu22.04`
+- `nvidia/cuda:12.8.0-devel-ubuntu22.04`
+
+That CUDA floor matters for modern NVIDIA fleets. On Vast, RTX 5000-series / Blackwell inventory is matched against CUDA 12.8-compatible templates.
 
 Recommended public on-start command:
 
@@ -102,6 +104,13 @@ The template probes both:
 - the NVIDIA runtime via `nvidia-smi`
 - the OpenCL device layer used by the Blockmine GPU miner
 
+Today the Linux GPU miner still uses OpenCL for the hashing backend. That means a Vast instance must expose:
+
+- the NVIDIA runtime
+- a usable OpenCL platform inside the container
+
+If the instance shows `nvidia-smi` but no OpenCL devices, the console stays alive and reports the mismatch instead of crashing.
+
 If the instance shows NVIDIA hardware but no OpenCL devices, the template keeps the console live and waits instead of crashing the miner process.
 
 ## Leaderboard
@@ -110,8 +119,9 @@ The interactive console uses the same signed leaderboard heartbeat path as the d
 
 Once the worker starts mining, it appears on the public leaderboard as:
 
-- platform: `Linux`
+- platform: `Mining Rig - Vast.ai`
 - backend: `CPU`, `GPU`, or `BOTH`, depending on the worker configuration
+- hardware summary: the detected GPU fleet, for example `4x NVIDIA GeForce RTX 5090`
 
 The worker does not need to find a block first. It appears as soon as the mining loop is live and the heartbeat starts flowing.
 
