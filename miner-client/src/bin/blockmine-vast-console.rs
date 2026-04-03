@@ -396,7 +396,7 @@ impl VastConsole {
     }
 
     fn render(&mut self) -> Result<()> {
-        let (_, height) = size().unwrap_or((120, 40));
+        let (width, height) = size().unwrap_or((120, 40));
         let funded_line = if self.wallet_is_funded() {
             "funded"
         } else {
@@ -427,8 +427,11 @@ impl VastConsole {
             Print("Blockmine Vast Console\n"),
             SetAttribute(Attribute::Reset),
             Print("[S] Start/Stop  [W] Withdraw  [R] Refresh GPU probe  [Q] Quit\n"),
-            Print(format!("Worker label : {} | Backend : {:?} | Runtime : {}\n", self.cli.worker_label, self.cli.backend, runtime)),
-            Print(format!("Console      : {} | Wallet state : {}\n\n", if mining_running { "mining live" } else { "idle" }, funded_line)),
+            Print(format!("Worker label : {}\n", self.cli.worker_label)),
+            Print(format!("Backend      : {:?}\n", self.cli.backend)),
+            Print(format!("Runtime      : {}\n", runtime)),
+            Print(format!("Console      : {}\n", if mining_running { "mining live" } else { "idle" })),
+            Print(format!("Wallet state : {}\n\n", funded_line)),
             SetAttribute(Attribute::Bold),
             Print("Wallet\n"),
             SetAttribute(Attribute::Reset),
@@ -448,8 +451,24 @@ impl VastConsole {
             SetAttribute(Attribute::Bold),
             Print("Detected GPUs\n"),
             SetAttribute(Attribute::Reset),
-            Print(format!("NVIDIA runtime : {}\n", nvidia_runtime)),
-            Print(format!("OpenCL devices : {}\n", opencl_runtime)),
+            Print("NVIDIA runtime\n"),
+        )?;
+
+        for line in wrap_text(&nvidia_runtime, width.saturating_sub(4) as usize).into_iter() {
+            queue!(self.stdout, Print(format!("  {line}\n")))?;
+        }
+
+        queue!(
+            self.stdout,
+            Print("OpenCL devices\n"),
+        )?;
+
+        for line in wrap_text(&opencl_runtime, width.saturating_sub(4) as usize).into_iter() {
+            queue!(self.stdout, Print(format!("  {line}\n")))?;
+        }
+
+        queue!(
+            self.stdout,
             Print(format!("GPU status     : {}\n\n", self.gpu_status)),
             SetAttribute(Attribute::Bold),
             Print("Mining telemetry\n"),
@@ -766,4 +785,38 @@ fn prompt_line() -> Result<String> {
 fn clear_plain_screen() -> Result<()> {
     execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
     Ok(())
+}
+
+fn wrap_text(input: &str, max_width: usize) -> Vec<String> {
+    if max_width < 10 || input.len() <= max_width {
+        return vec![input.to_string()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current = String::new();
+
+    for part in input.split(" | ") {
+        let candidate = if current.is_empty() {
+            part.to_string()
+        } else {
+            format!("{current} | {part}")
+        };
+
+        if candidate.len() > max_width && !current.is_empty() {
+            lines.push(current);
+            current = part.to_string();
+        } else {
+            current = candidate;
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        vec![input.to_string()]
+    } else {
+        lines
+    }
 }
