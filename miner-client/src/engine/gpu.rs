@@ -169,64 +169,67 @@ pub fn list_devices() -> Result<Vec<GpuDeviceInfo>> {
     use ocl::enums::{DeviceInfo, DeviceInfoResult};
     use ocl::Platform;
 
-    let mut items = Vec::new();
-    for (platform_index, platform) in Platform::list().into_iter().enumerate() {
-        let platform_name = platform
-            .name()
-            .context("failed to read OpenCL platform name")?;
-        let devices = ocl::Device::list_all(platform).with_context(|| {
-            format!(
-                "failed to enumerate OpenCL devices for platform {}",
-                platform_index
-            )
-        })?;
+    std::panic::catch_unwind(|| {
+        let mut items = Vec::new();
+        for (platform_index, platform) in Platform::list().into_iter().enumerate() {
+            let platform_name = platform
+                .name()
+                .context("failed to read OpenCL platform name")?;
+            let devices = ocl::Device::list_all(platform).with_context(|| {
+                format!(
+                    "failed to enumerate OpenCL devices for platform {}",
+                    platform_index
+                )
+            })?;
 
-        for (device_index, device) in devices.into_iter().enumerate() {
-            let device_name = device.name().context("failed to read OpenCL device name")?;
-            let vendor = device
-                .vendor()
-                .context("failed to read OpenCL device vendor")?;
-            let version = device
-                .version()
-                .context("failed to read OpenCL device version")?
-                .to_string();
-            let global_memory_bytes = match device
-                .info(DeviceInfo::GlobalMemSize)
-                .context("failed to read OpenCL global memory size")?
-            {
-                DeviceInfoResult::GlobalMemSize(bytes) => bytes,
-                _ => 0,
-            };
-            let max_compute_units = match device
-                .info(DeviceInfo::MaxComputeUnits)
-                .context("failed to read OpenCL compute units")?
-            {
-                DeviceInfoResult::MaxComputeUnits(units) => units,
-                _ => 0,
-            };
-            let max_work_group_size = match device
-                .info(DeviceInfo::MaxWorkGroupSize)
-                .context("failed to read OpenCL work group size")?
-            {
-                DeviceInfoResult::MaxWorkGroupSize(size) => size,
-                _ => 0,
-            };
+            for (device_index, device) in devices.into_iter().enumerate() {
+                let device_name = device.name().context("failed to read OpenCL device name")?;
+                let vendor = device
+                    .vendor()
+                    .context("failed to read OpenCL device vendor")?;
+                let version = device
+                    .version()
+                    .context("failed to read OpenCL device version")?
+                    .to_string();
+                let global_memory_bytes = match device
+                    .info(DeviceInfo::GlobalMemSize)
+                    .context("failed to read OpenCL global memory size")?
+                {
+                    DeviceInfoResult::GlobalMemSize(bytes) => bytes,
+                    _ => 0,
+                };
+                let max_compute_units = match device
+                    .info(DeviceInfo::MaxComputeUnits)
+                    .context("failed to read OpenCL compute units")?
+                {
+                    DeviceInfoResult::MaxComputeUnits(units) => units,
+                    _ => 0,
+                };
+                let max_work_group_size = match device
+                    .info(DeviceInfo::MaxWorkGroupSize)
+                    .context("failed to read OpenCL work group size")?
+                {
+                    DeviceInfoResult::MaxWorkGroupSize(size) => size,
+                    _ => 0,
+                };
 
-            items.push(GpuDeviceInfo {
-                platform_index,
-                device_index,
-                platform_name: platform_name.clone(),
-                device_name,
-                vendor,
-                version,
-                global_memory_bytes,
-                max_compute_units,
-                max_work_group_size,
-            });
+                items.push(GpuDeviceInfo {
+                    platform_index,
+                    device_index,
+                    platform_name: platform_name.clone(),
+                    device_name,
+                    vendor,
+                    version,
+                    global_memory_bytes,
+                    max_compute_units,
+                    max_work_group_size,
+                });
+            }
         }
-    }
 
-    Ok(items)
+        Ok(items)
+    })
+    .map_err(|_| anyhow::anyhow!("OpenCL platform enumeration panicked; the runtime is present but no usable OpenCL platform was exposed inside the container"))?
 }
 
 #[cfg(not(feature = "opencl"))]
@@ -255,13 +258,20 @@ impl MiningEngine for GpuMiner {
     }
 
     fn search_batch(&self, input: &SearchInput) -> Result<Option<FoundSolution>> {
-        run_opencl_search(
-            self,
-            self.platform_index,
-            self.device_index,
-            self.local_work_size,
-            input,
-        )
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_opencl_search(
+                self,
+                self.platform_index,
+                self.device_index,
+                self.local_work_size,
+                input,
+            )
+        }))
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "OpenCL GPU runtime panicked while searching. This usually means the container can see the NVIDIA driver but no usable OpenCL platform is exposed."
+            )
+        })?
     }
 
     fn benchmark(&self, seconds: u64) -> Result<BenchmarkReport> {

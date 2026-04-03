@@ -8,6 +8,7 @@ export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL:-https://api.mainnet-beta.solana.c
 export BLOCKMINE_PROGRAM_ID="${BLOCKMINE_PROGRAM_ID:-FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv}"
 export BLOCKMINE_REPO_URL="${BLOCKMINE_REPO_URL:-https://github.com/blockminelabs/blockmine-core.git}"
 export BLOCKMINE_REPO_DIR="${BLOCKMINE_REPO_DIR:-/workspace/blockmine-core}"
+export BLOCKMINE_HEADLESS_AUTOSTART="${BLOCKMINE_HEADLESS_AUTOSTART:-0}"
 export PATH="${HOME}/.cargo/bin:${PATH}"
 
 LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
@@ -57,13 +58,23 @@ cargo build --release \
   --manifest-path "${BLOCKMINE_REPO_DIR}/miner-client/Cargo.toml" \
   --features opencl \
   --bin blockmine-wallet \
-  --bin blockmine-vast-worker
+  --bin blockmine-vast-worker \
+  --bin blockmine-vast-console
 
 echo "[blockmine] preparing worker wallet"
 "${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-wallet" ensure
-echo
-echo "[blockmine] if this is the first boot, open a terminal and run:"
-echo "[blockmine]   ${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-wallet reveal"
-echo "[blockmine] logs: ${LOG_FILE}"
+"${BLOCKMINE_REPO_DIR}/packaging/vastai/scripts/ensure-opencl-nvidia.sh"
+"${BLOCKMINE_REPO_DIR}/packaging/vastai/scripts/install-auto-console.sh" \
+  "${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-console"
 
-nohup "${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-worker" >>"${LOG_FILE}" 2>&1 &
+echo
+echo "[blockmine] open a Jupyter or SSH terminal."
+echo "[blockmine] the Blockmine console will launch automatically."
+echo "[blockmine] if it does not, run:"
+echo "[blockmine]   ${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-console"
+echo "[blockmine] logs (headless mode only): ${LOG_FILE}"
+
+if [ "${BLOCKMINE_HEADLESS_AUTOSTART}" = "1" ]; then
+  echo "[blockmine] headless autostart enabled"
+  nohup "${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-worker" >>"${LOG_FILE}" 2>&1 &
+fi

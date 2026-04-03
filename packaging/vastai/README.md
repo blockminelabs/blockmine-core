@@ -10,6 +10,7 @@ The image includes:
 
 - `blockmine-miner`
 - `blockmine-wallet`
+- `blockmine-vast-console`
 - `blockmine-vast-worker`
 - `/opt/blockmine/scripts/on-start.sh`
 - `/opt/blockmine/scripts/start-miner.sh`
@@ -28,7 +29,14 @@ Runtime storage defaults to:
 
 - `/workspace/blockmine-data`
 
-The headless worker uses the same signed leaderboard heartbeat path as the desktop miner. When mining starts, the worker appears on the public leaderboard as a Linux miner.
+The interactive console uses the same signed leaderboard heartbeat path as the desktop miner. When mining starts, the worker appears on the public leaderboard as a Linux miner.
+
+The on-start flow:
+
+- ensures the worker wallet exists
+- configures the NVIDIA OpenCL ICD if the driver is mounted into the container
+- installs an auto-launch hook so `blockmine-vast-console` opens when the user enters Jupyter or SSH
+- leaves headless background mining disabled unless `BLOCKMINE_HEADLESS_AUTOSTART=1`
 
 ## Public bootstrap path
 
@@ -49,6 +57,6 @@ That path:
 - installs the required packages
 - installs Rust if needed
 - clones or updates the public Blockmine core repo
-- builds `blockmine-wallet` and `blockmine-vast-worker`
-- starts the worker
+- builds `blockmine-wallet`, `blockmine-vast-console`, and `blockmine-vast-worker`
+- installs the interactive auto-console flow
 - keeps the same wallet under `/workspace/blockmine-data`

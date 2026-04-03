@@ -12,7 +12,7 @@
 
 # Vast.ai Mining
 
-Blockmine can run on Vast.ai as a headless Linux worker.
+Blockmine can run on Vast.ai as an interactive Linux mining console.
 
 The public Vast template is designed so that every instance mines to its own wallet. No shared key is embedded in the image.
 
@@ -22,7 +22,7 @@ Use the Blockmine Vast template in:
 
 - `Jupyter + SSH` mode
 
-This gives the instance an interactive terminal. The worker uses that terminal once on first boot to reveal the recovery material only after explicit confirmation.
+This gives the instance an interactive terminal. The Blockmine console uses that terminal once on first boot to reveal the recovery material only after explicit confirmation, then it stays open as a live mining dashboard.
 
 ## Template source
 
@@ -47,23 +47,25 @@ bash -lc "$(curl -fsSL https://raw.githubusercontent.com/blockminelabs/blockmine
 
 On first boot the container creates a dedicated worker wallet if one does not already exist in the instance storage directory.
 
-To reveal the wallet recovery material, run:
+When the user opens a Jupyter terminal or SSH session, the Blockmine console launches automatically.
+
+If it does not, run:
 
 ```bash
-blockmine-wallet reveal
+blockmine-vast-console
 ```
 
-The command will:
+The console will:
 
 1. warn that the recovery material controls the mined funds
 2. require `YES` before showing the recovery material
 3. show the public address, recovery phrase, and private key
-4. require `Y` to confirm that the recovery material has been stored
-5. print the funding target for the current era and current block
+4. require `YES` again to confirm that the recovery material has been stored
+5. clear the screen and open the live mining console
 
 ## Funding
 
-Once the recovery material has been confirmed, the worker prints:
+Once the recovery material has been confirmed, the console prints:
 
 - the wallet address
 - the fixed accepted-block fee in SOL
@@ -71,20 +73,40 @@ Once the recovery material has been confirmed, the worker prints:
 - the current era
 - the current block number
 
-Send SOL to the worker wallet. The worker waits until the wallet balance is high enough to start mining.
+Send SOL to the worker wallet. The console polls the wallet balance live and starts mining automatically as soon as the balance is high enough.
 
 ## Start behavior
 
-The Vast worker starts automatically after:
+The Vast mining loop starts automatically after:
 
 - the wallet backup has been confirmed
 - the wallet has enough SOL to pay the accepted-block fee and transaction fees
 
 No manual `mine` command is required after that point.
 
+## Console controls
+
+Inside the live console:
+
+- `S` starts or stops mining
+- `W` opens the withdrawal flow for SOL and BLOC
+- `R` refreshes the GPU probe
+- `Q` exits the console
+
+The withdrawal flow accepts fixed amounts or `MAX`.
+
+## GPU detection
+
+The template probes both:
+
+- the NVIDIA runtime via `nvidia-smi`
+- the OpenCL device layer used by the Blockmine GPU miner
+
+If the instance shows NVIDIA hardware but no OpenCL devices, the template keeps the console live and waits instead of crashing the miner process.
+
 ## Leaderboard
 
-The headless worker uses the same signed leaderboard heartbeat path as the desktop miner.
+The interactive console uses the same signed leaderboard heartbeat path as the desktop miner.
 
 Once the worker starts mining, it appears on the public leaderboard as:
 
@@ -95,7 +117,13 @@ The worker does not need to find a block first. It appears as soon as the mining
 
 ## Runtime controls
 
-The worker binary is:
+The interactive console binary is:
+
+```bash
+blockmine-vast-console
+```
+
+The headless worker binary remains available for non-interactive use:
 
 ```bash
 blockmine-vast-worker
@@ -131,6 +159,7 @@ blockmine-wallet keypair-path
 blockmine-wallet backup-status
 blockmine-wallet funding-hint
 blockmine-wallet reveal
+blockmine-vast-console
 ```
 
 ## Persistence

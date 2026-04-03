@@ -30,7 +30,8 @@ RUN cargo build --release \
     --features opencl \
     --bin blockmine-miner \
     --bin blockmine-wallet \
-    --bin blockmine-vast-worker
+    --bin blockmine-vast-worker \
+    --bin blockmine-vast-console
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
@@ -51,6 +52,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=build /src/miner-client/target/release/blockmine-miner /usr/local/bin/blockmine-miner
 COPY --from=build /src/miner-client/target/release/blockmine-wallet /usr/local/bin/blockmine-wallet
 COPY --from=build /src/miner-client/target/release/blockmine-vast-worker /usr/local/bin/blockmine-vast-worker
+COPY --from=build /src/miner-client/target/release/blockmine-vast-console /usr/local/bin/blockmine-vast-console
 COPY packaging/vastai/scripts /opt/blockmine/scripts
 
 RUN chmod +x /opt/blockmine/scripts/*.sh
