@@ -32,6 +32,7 @@ use solana_sdk::{
 const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
 const DEFAULT_RPC_URL: &str = "https://solana-rpc.publicnode.com";
 const DEFAULT_SITE_URL: &str = "https://blockmine.dev";
+const DEFAULT_LEADERBOARD_INGEST_URL: &str = "https://blockmine.dev/api/leaderboard/heartbeat";
 
 #[derive(Debug, Parser, Clone)]
 #[command(name = "blockmine-vast-console", about = "Interactive SSH/Jupyter console for Blockmine Vast.ai miners")]
@@ -327,7 +328,9 @@ impl VastConsole {
             .cli
             .leaderboard_ingest_url
             .clone()
-            .or_else(|| derive_leaderboard_ingest_url(&self.cli.site_url));
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| derive_leaderboard_ingest_url(&self.cli.site_url))
+            .or_else(|| Some(DEFAULT_LEADERBOARD_INGEST_URL.to_string()));
 
         let handle = MiningHandle::start(
             self.config.clone(),
@@ -457,104 +460,68 @@ impl VastConsole {
             format_sol(self.protocol_submit_fee_lamports)
         );
 
+        let leaderboard_url = self
+            .cli
+            .leaderboard_ingest_url
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| derive_leaderboard_ingest_url(&self.cli.site_url))
+            .unwrap_or_else(|| DEFAULT_LEADERBOARD_INGEST_URL.to_string());
+
+        let lines = [
+            "Blockmine Vast Console".to_string(),
+            "[S] Start/Stop  [W] Withdraw  [R] Refresh GPU probe  [Q] Quit".to_string(),
+            String::new(),
+            format!("Console: {console_state}"),
+            format!("Wallet state: {funded_line}"),
+            format!("Worker: {}", self.cli.worker_label),
+            format!("Backend: {:?}", self.cli.backend),
+            format!("Runtime: {runtime}"),
+            String::new(),
+            format!("Live Rate: {live_rate}"),
+            format!("Attempts: {attempts}"),
+            format!("Blocks Mined: {}", self.wallet_blocks_mined),
+            format!("$BLOC mined: {wallet_mined}"),
+            String::new(),
+            format!("Status: {status_label}"),
+            format!("Era: {}", self.protocol_era),
+            format!("Current block: #{}", self.protocol_current_block),
+            format!("Reward: {} BLOC", format_bloc(self.protocol_current_reward)),
+            format!("Difficulty: {} bits", self.protocol_difficulty_bits),
+            String::new(),
+            format!("Wallet: {}", self.wallet.pubkey),
+            format!("SOL balance: {}", format_sol(self.wallet_sol_lamports)),
+            format!(
+                "BLOC balance: {}",
+                format_token_amount(self.wallet_bloc_raw, self.wallet_bloc_decimals)
+            ),
+            format!("Wallet mined: {} across {} blocks", wallet_mined, self.wallet_blocks_mined),
+            format!("Last tx: {last_tx}"),
+            String::new(),
+            format!("Rig summary: {rig_summary}"),
+            format!("OpenCL: {opencl_summary}"),
+            format!("GPU status: {}", self.gpu_status),
+            String::new(),
+            format!("Last event: {}", self.mining_snapshot.last_event),
+            format!("Note: {}", self.last_message),
+            format!("Sample: {sample_line}"),
+            format!("Leaderboard: {leaderboard_url}"),
+        ];
+
         queue!(self.stdout, MoveTo(0, 0), Clear(ClearType::All))?;
-        queue!(
-            self.stdout,
-            SetAttribute(Attribute::Bold),
-            Print("Blockmine Vast Console\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(
-                "[S] Start/Stop  [W] Withdraw  [R] Refresh GPU probe  [Q] Quit",
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(&format!("Console: {console_state}"), width)),
-            Print("\n\n"),
-            Print(trim_line(&format!("Wallet state: {funded_line}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Worker: {}", self.cli.worker_label), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Backend: {:?}", self.cli.backend), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Runtime: {runtime}"), width)),
-            Print("\n\n"),
-            SetAttribute(Attribute::Bold),
-            Print("Telemetry\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(&format!("Live Rate: {live_rate}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Attempts: {attempts}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Blocks Mined: {}", self.wallet_blocks_mined), width)),
-            Print("\n"),
-            Print(trim_line(&format!("$BLOC mined: {wallet_mined}"), width)),
-            Print("\n\n"),
-            SetAttribute(Attribute::Bold),
-            Print("Protocol\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(&format!("Status: {status_label}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Era: {}", self.protocol_era), width)),
-            Print("\n"),
-            Print(trim_line(
-                &format!("Current block: #{}", self.protocol_current_block),
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(
-                &format!("Reward: {} BLOC", format_bloc(self.protocol_current_reward)),
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(
-                &format!("Difficulty: {} bits", self.protocol_difficulty_bits),
-                width,
-            )),
-            Print("\n\n"),
-            SetAttribute(Attribute::Bold),
-            Print("Wallet\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(&format!("Address: {}", self.wallet.pubkey), width)),
-            Print("\n"),
-            Print(trim_line(
-                &format!("SOL balance: {}", format_sol(self.wallet_sol_lamports)),
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(
-                &format!(
-                    "BLOC balance: {}",
-                    format_token_amount(self.wallet_bloc_raw, self.wallet_bloc_decimals)
-                ),
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(
-                &format!("Wallet mined: {} across {} blocks", wallet_mined, self.wallet_blocks_mined),
-                width,
-            )),
-            Print("\n"),
-            Print(trim_line(&format!("Last tx: {last_tx}"), width)),
-            Print("\n\n"),
-            SetAttribute(Attribute::Bold),
-            Print("Rig\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(&format!("Rig summary: {rig_summary}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("OpenCL: {opencl_summary}"), width)),
-            Print("\n"),
-            Print(trim_line(&format!("GPU status: {}", self.gpu_status), width)),
-            Print("\n\n"),
-            SetAttribute(Attribute::Bold),
-            Print("Recent status\n"),
-            SetAttribute(Attribute::Reset),
-            Print(trim_line(&format!("Last event: {}", self.mining_snapshot.last_event), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Note: {}", self.last_message), width)),
-            Print("\n"),
-            Print(trim_line(&format!("Sample: {sample_line}"), width)),
-            Print("\n"),
-        )?;
+        for (index, line) in lines.iter().enumerate() {
+            if index == 0 {
+                queue!(
+                    self.stdout,
+                    SetAttribute(Attribute::Bold),
+                    Print(trim_line(line, width)),
+                    SetAttribute(Attribute::Reset),
+                    Print("\n")
+                )?;
+            } else {
+                queue!(self.stdout, Print(trim_line(line, width)), Print("\n"))?;
+            }
+        }
 
         if !self.wallet_is_funded() {
             queue!(self.stdout, Print("\n"), Print(trim_line(&deposit_line, width)), Print("\n"))?;

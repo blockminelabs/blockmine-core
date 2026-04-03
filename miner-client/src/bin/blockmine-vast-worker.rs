@@ -22,6 +22,7 @@ use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
 const DEFAULT_RPC_URL: &str = "https://solana-rpc.publicnode.com";
 const DEFAULT_SITE_URL: &str = "https://blockmine.dev";
+const DEFAULT_LEADERBOARD_INGEST_URL: &str = "https://blockmine.dev/api/leaderboard/heartbeat";
 
 #[derive(Debug, Parser)]
 #[command(name = "blockmine-vast-worker", about = "Headless Blockmine worker for Vast.ai")]
@@ -91,7 +92,9 @@ fn main() -> Result<()> {
     let ingest_url = cli
         .leaderboard_ingest_url
         .clone()
-        .or_else(|| derive_leaderboard_ingest_url(&cli.site_url));
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| derive_leaderboard_ingest_url(&cli.site_url))
+        .or_else(|| Some(DEFAULT_LEADERBOARD_INGEST_URL.to_string()));
 
     println!("Starting mining service.");
     println!(
