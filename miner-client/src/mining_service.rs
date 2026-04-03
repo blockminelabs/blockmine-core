@@ -29,7 +29,7 @@ use crate::submitter;
 const RPC_RETRY_ATTEMPTS: usize = 6;
 const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
-const BLOCK_REFRESH_INTERVAL: Duration = Duration::from_millis(400);
+const BLOCK_REFRESH_INTERVAL: Duration = Duration::from_millis(1_500);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[cfg(target_os = "windows")]
