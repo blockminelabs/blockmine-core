@@ -188,7 +188,7 @@ impl LeaderboardReporter {
         let client = if trimmed_url.is_some() {
             Some(
                 Client::builder()
-                    .timeout(Duration::from_secs(4))
+                    .timeout(Duration::from_secs(10))
                     .user_agent("Blockmine Miner/1.0 (+https://blockmine.dev)")
                     .build()
                     .context("failed to build the leaderboard HTTP client")?,
