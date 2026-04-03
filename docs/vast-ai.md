@@ -24,6 +24,25 @@ Use the Blockmine Vast template in:
 
 This gives the instance an interactive terminal. The worker uses that terminal once on first boot to reveal the recovery material only after explicit confirmation.
 
+## Template source
+
+There are two valid template sources:
+
+1. a prebuilt Blockmine image
+2. a public bootstrap flow that starts from a public CUDA base image and pulls the public Blockmine core repository at boot
+
+The public bootstrap path exists so the template can be used immediately even before a dedicated container registry release is published.
+
+Recommended public bootstrap image:
+
+- `nvidia/cuda:12.4.1-devel-ubuntu22.04`
+
+Recommended public on-start command:
+
+```bash
+bash -lc "$(curl -fsSL https://raw.githubusercontent.com/blockminelabs/blockmine-core/main/packaging/vastai/scripts/bootstrap-vast.sh)"
+```
+
 ## First boot
 
 On first boot the container creates a dedicated worker wallet if one does not already exist in the instance storage directory.
@@ -98,6 +117,8 @@ Useful environment variables:
 - `BLOCKMINE_MIN_START_SOL`
 - `BLOCKMINE_FUNDING_POLL_SECONDS`
 - `BLOCKMINE_STORAGE_DIR`
+- `BLOCKMINE_REPO_URL`
+- `BLOCKMINE_REPO_DIR`
 
 ## Wallet commands
 

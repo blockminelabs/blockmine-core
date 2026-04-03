@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+export BLOCKMINE_STORAGE_DIR="${BLOCKMINE_STORAGE_DIR:-/workspace/blockmine-data}"
+export BLOCKMINE_SITE_URL="${BLOCKMINE_SITE_URL:-https://blockmine.dev}"
+export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL:-https://api.mainnet-beta.solana.com}"
+export BLOCKMINE_PROGRAM_ID="${BLOCKMINE_PROGRAM_ID:-FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv}"
+export BLOCKMINE_REPO_URL="${BLOCKMINE_REPO_URL:-https://github.com/blockminelabs/blockmine-core.git}"
+export BLOCKMINE_REPO_DIR="${BLOCKMINE_REPO_DIR:-/workspace/blockmine-core}"
+export PATH="${HOME}/.cargo/bin:${PATH}"
+
+LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
+LOG_FILE="${LOG_DIR}/blockmine-vast-worker.log"
+
+mkdir -p "${BLOCKMINE_STORAGE_DIR}" "${LOG_DIR}" /workspace
+
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "[blockmine] apt-get not found; use the Ubuntu CUDA base image for this template." >&2
+  exit 1
+fi
+
+echo "[blockmine] installing system dependencies"
+apt-get update
+apt-get install -y --no-install-recommends \
+  bash \
+  build-essential \
+  ca-certificates \
+  clang \
+  cmake \
+  curl \
+  git \
+  libssl-dev \
+  ocl-icd-opencl-dev \
+  opencl-headers \
+  pkg-config \
+  procps \
+  tmux
+rm -rf /var/lib/apt/lists/*
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "[blockmine] installing rust toolchain"
+  curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+fi
+
+if [ ! -d "${BLOCKMINE_REPO_DIR}/.git" ]; then
+  echo "[blockmine] cloning core repo"
+  git clone "${BLOCKMINE_REPO_URL}" "${BLOCKMINE_REPO_DIR}"
+else
+  echo "[blockmine] updating core repo"
+  git -C "${BLOCKMINE_REPO_DIR}" fetch origin
+  git -C "${BLOCKMINE_REPO_DIR}" pull --ff-only origin main
+fi
+
+echo "[blockmine] building worker binaries"
+cargo build --release \
+  --manifest-path "${BLOCKMINE_REPO_DIR}/miner-client/Cargo.toml" \
+  --features opencl \
+  --bin blockmine-wallet \
+  --bin blockmine-vast-worker
+
+echo "[blockmine] preparing worker wallet"
+"${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-wallet" ensure
+echo
+echo "[blockmine] if this is the first boot, open a terminal and run:"
+echo "[blockmine]   ${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-wallet reveal"
+echo "[blockmine] logs: ${LOG_FILE}"
+
+nohup "${BLOCKMINE_REPO_DIR}/miner-client/target/release/blockmine-vast-worker" >>"${LOG_FILE}" 2>&1 &
