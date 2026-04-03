@@ -29,10 +29,12 @@ apt-get install -y --no-install-recommends \
   build-essential \
   ca-certificates \
   clang \
+  clinfo \
   cmake \
   curl \
   git \
   libssl-dev \
+  ocl-icd-libopencl1 \
   ocl-icd-opencl-dev \
   opencl-headers \
   pkg-config \

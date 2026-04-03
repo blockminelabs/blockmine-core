@@ -70,3 +70,4 @@ Important:
 - the current Linux GPU miner still uses OpenCL
 - the template therefore needs both the NVIDIA runtime and a usable OpenCL platform in the container
 - the console will stay live and report the mismatch if `nvidia-smi` works but no OpenCL device is exposed
+- the packaging now installs `clinfo` and writes the NVIDIA ICD registration automatically

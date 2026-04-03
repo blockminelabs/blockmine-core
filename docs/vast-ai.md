@@ -111,6 +111,12 @@ Today the Linux GPU miner still uses OpenCL for the hashing backend. That means 
 
 If the instance shows `nvidia-smi` but no OpenCL devices, the console stays alive and reports the mismatch instead of crashing.
 
+The Vast packaging now also:
+
+- installs `clinfo`
+- writes the NVIDIA ICD file under `/etc/OpenCL/vendors/nvidia.icd`
+- exports `OCL_ICD_VENDORS`, `OPENCL_VENDOR_PATH`, and a library path that includes `/usr/lib/x86_64-linux-gnu`
+
 If the instance shows NVIDIA hardware but no OpenCL devices, the template keeps the console live and waits instead of crashing the miner process.
 
 ## Leaderboard

@@ -42,6 +42,7 @@ ENV PATH=/usr/local/bin:${PATH}
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     ca-certificates \
+    clinfo \
     curl \
     libssl3 \
     ocl-icd-libopencl1 \
