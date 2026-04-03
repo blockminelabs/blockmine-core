@@ -6,6 +6,7 @@ export BLOCKMINE_STORAGE_DIR="${BLOCKMINE_STORAGE_DIR:-/workspace/blockmine-data
 export BLOCKMINE_SITE_URL="${BLOCKMINE_SITE_URL:-https://blockmine.dev}"
 export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL:-https://api.mainnet-beta.solana.com}"
 export BLOCKMINE_PROGRAM_ID="${BLOCKMINE_PROGRAM_ID:-FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv}"
+export BLOCKMINE_LEADERBOARD_INGEST_URL="${BLOCKMINE_LEADERBOARD_INGEST_URL:-}"
 export BLOCKMINE_REPO_URL="${BLOCKMINE_REPO_URL:-https://github.com/blockminelabs/blockmine-core.git}"
 export BLOCKMINE_REPO_DIR="${BLOCKMINE_REPO_DIR:-/workspace/blockmine-core}"
 export BLOCKMINE_HEADLESS_AUTOSTART="${BLOCKMINE_HEADLESS_AUTOSTART:-0}"
@@ -13,9 +14,20 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 
 LOG_DIR="${BLOCKMINE_LOG_DIR:-/workspace/blockmine-logs}"
 LOG_FILE="${LOG_DIR}/blockmine-vast-worker.log"
+PROFILE_FILE="/etc/profile.d/blockmine-vast.sh"
 
 mkdir -p "${BLOCKMINE_STORAGE_DIR}" "${LOG_DIR}" /workspace
 env | grep _ >> /etc/environment || true
+
+cat >"${PROFILE_FILE}" <<EOF
+export BLOCKMINE_STORAGE_DIR="${BLOCKMINE_STORAGE_DIR}"
+export BLOCKMINE_SITE_URL="${BLOCKMINE_SITE_URL}"
+export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL}"
+export BLOCKMINE_PROGRAM_ID="${BLOCKMINE_PROGRAM_ID}"
+export BLOCKMINE_LEADERBOARD_INGEST_URL="${BLOCKMINE_LEADERBOARD_INGEST_URL}"
+export PATH="${HOME}/.cargo/bin:\${PATH}"
+EOF
+chmod 644 "${PROFILE_FILE}"
 
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "[blockmine] apt-get not found; use the Ubuntu CUDA base image for this template." >&2

@@ -409,7 +409,7 @@ impl VastConsole {
     }
 
     fn render(&mut self) -> Result<()> {
-        let (width, height) = size().unwrap_or((120, 40));
+        let (width, _) = size().unwrap_or((120, 40));
         let funded_line = if self.wallet_is_funded() {
             "funded"
         } else {
@@ -422,15 +422,68 @@ impl VastConsole {
         } else {
             self.mining_snapshot.last_hashrate.clone()
         };
-        let nvidia_runtime = if self.nvidia_devices.is_empty() {
-            "none detected".to_string()
+        let rig_summary = if self.hardware_summary.is_empty() {
+            "GPU rig not detected".to_string()
         } else {
-            self.nvidia_devices.join(" | ")
+            self.hardware_summary.clone()
         };
-        let opencl_runtime = if self.opencl_devices.is_empty() {
-            "none detected".to_string()
+        let opencl_summary = if self.opencl_devices.is_empty() {
+            "OpenCL none".to_string()
         } else {
-            self.opencl_devices.join(" | ")
+            format!("OpenCL {} device(s)", self.opencl_devices.len())
+        };
+        let wallet_mined = format_bloc(self.wallet_tokens_mined);
+        let attempts = format_u64(self.mining_snapshot.session_hashes);
+        let telemetry_line = format!(
+            "Live Rate: {}  |  Attempts: {}  |  Blocks Mined: {}  |  $BLOC mined: {}",
+            last_rate, attempts, self.wallet_blocks_mined, wallet_mined
+        );
+        let status_line = format!(
+            "Status: {}  |  Era: {}  |  Block: #{}  |  Reward: {} BLOC  |  Difficulty: {} bits",
+            if mining_running {
+                self.mining_snapshot.status.as_str()
+            } else {
+                "Idle"
+            },
+            self.protocol_era,
+            self.protocol_current_block,
+            format_bloc(self.protocol_current_reward),
+            self.protocol_difficulty_bits
+        );
+        let wallet_line = format!(
+            "Wallet: {}  |  SOL: {}  |  BLOC: {}",
+            self.wallet.pubkey,
+            format_sol(self.wallet_sol_lamports),
+            format_token_amount(self.wallet_bloc_raw, self.wallet_bloc_decimals)
+        );
+        let rig_line = format!(
+            "Rig: {}  |  {}  |  {}",
+            rig_summary,
+            opencl_summary,
+            self.gpu_status
+        );
+        let tx_line = format!(
+            "Last tx: {}",
+            self.mining_snapshot
+                .last_signature
+                .clone()
+                .unwrap_or_else(|| "-".to_string())
+        );
+        let event_line = format!(
+            "Last event: {}  |  Runtime: {}  |  Worker: {}  |  Backend: {:?}",
+            self.mining_snapshot.last_event, runtime, self.cli.worker_label, self.cli.backend
+        );
+        let note_line = format!("Note: {}", self.last_message);
+        let deposit_line = format!(
+            "Deposit SOL to {}  |  Min start {}  |  Fee / block {}",
+            self.wallet.pubkey,
+            format_sol((self.cli.min_start_sol * 1_000_000_000.0).ceil() as u64),
+            format_sol(self.protocol_submit_fee_lamports)
+        );
+        let report_line = if let Some(report) = self.mining_snapshot.recent_reports.first() {
+            format!("Sample: {}", report)
+        } else {
+            "Sample: waiting for clean hashrate samples...".to_string()
         };
 
         queue!(self.stdout, MoveTo(0, 0), Clear(ClearType::All))?;
@@ -439,72 +492,46 @@ impl VastConsole {
             SetAttribute(Attribute::Bold),
             Print("Blockmine Vast Console\n"),
             SetAttribute(Attribute::Reset),
-            Print("[S] Start/Stop  [W] Withdraw  [R] Refresh GPU probe  [Q] Quit\n"),
-            Print(format!("Worker label : {}\n", self.cli.worker_label)),
-            Print(format!("Backend      : {:?}\n", self.cli.backend)),
-            Print(format!("Runtime      : {}\n", runtime)),
-            Print(format!("Console      : {}\n", if mining_running { "mining live" } else { "idle" })),
-            Print(format!("Wallet state : {}\n\n", funded_line)),
+            Print(fit_line("[S] Start/Stop  [W] Withdraw  [R] Refresh GPU probe  [Q] Quit", width)),
+            Print("\n"),
+            Print(fit_line(
+                &format!(
+                    "Console: {}  |  Wallet state: {}",
+                    if mining_running { "mining live" } else { "idle" },
+                    funded_line
+                ),
+                width,
+            )),
+            Print("\n\n"),
+            SetAttribute(Attribute::Bold),
+            Print("Telemetry\n"),
+            SetAttribute(Attribute::Reset),
+            Print(fit_line(&telemetry_line, width)),
+            Print("\n"),
+            Print(fit_line(&status_line, width)),
+            Print("\n\n"),
             SetAttribute(Attribute::Bold),
             Print("Wallet\n"),
             SetAttribute(Attribute::Reset),
-            Print(format!("Address      : {}\n", self.wallet.pubkey)),
-            Print(format!("SOL balance  : {}\n", format_sol(self.wallet_sol_lamports))),
-            Print(format!("BLOC balance : {}\n", format_token_amount(self.wallet_bloc_raw, self.wallet_bloc_decimals))),
-            Print(format!("Wallet mined : {} BLOC across {} blocks\n\n", format_bloc(self.wallet_tokens_mined), self.wallet_blocks_mined)),
+            Print(fit_line(&wallet_line, width)),
+            Print("\n"),
+            Print(fit_line(&tx_line, width)),
+            Print("\n\n"),
             SetAttribute(Attribute::Bold),
-            Print("Funding target\n"),
+            Print("Rig\n"),
             SetAttribute(Attribute::Reset),
-            Print(format!("Deposit SOL to: {}\n", self.wallet.pubkey)),
-            Print(format!("Accepted block fee : {}\n", format_sol(self.protocol_submit_fee_lamports))),
-            Print(format!("Current reward     : {} BLOC\n", format_bloc(self.protocol_current_reward))),
-            Print(format!("Current era        : {}\n", self.protocol_era)),
-            Print(format!("Current block      : #{}\n", self.protocol_current_block)),
-            Print(format!("Difficulty         : {} bits\n\n", self.protocol_difficulty_bits)),
-            SetAttribute(Attribute::Bold),
-            Print("Detected GPUs\n"),
-            SetAttribute(Attribute::Reset),
-            Print(format!("Rig summary    : {}\n", if self.hardware_summary.is_empty() { "-".to_string() } else { self.hardware_summary.clone() })),
-            Print("NVIDIA runtime\n"),
+            Print(fit_line(&rig_line, width)),
+            Print("\n"),
+            Print(fit_line(&event_line, width)),
+            Print("\n"),
+            Print(fit_line(&note_line, width)),
+            Print("\n"),
+            Print(fit_line(&report_line, width)),
+            Print("\n"),
         )?;
 
-        for line in wrap_text(&nvidia_runtime, width.saturating_sub(4) as usize).into_iter() {
-            queue!(self.stdout, Print(format!("  {line}\n")))?;
-        }
-
-        queue!(
-            self.stdout,
-            Print("OpenCL devices\n"),
-        )?;
-
-        for line in wrap_text(&opencl_runtime, width.saturating_sub(4) as usize).into_iter() {
-            queue!(self.stdout, Print(format!("  {line}\n")))?;
-        }
-
-        queue!(
-            self.stdout,
-            Print(format!("GPU status     : {}\n\n", self.gpu_status)),
-            SetAttribute(Attribute::Bold),
-            Print("Mining telemetry\n"),
-            SetAttribute(Attribute::Reset),
-            Print(format!("Status         : {}\n", if mining_running { &self.mining_snapshot.status } else { "Idle" })),
-            Print(format!("Live rate      : {}\n", last_rate)),
-            Print(format!("Attempts       : {}\n", format_u64(self.mining_snapshot.session_hashes))),
-            Print(format!("Session mined  : {} BLOC across {} blocks\n", format_bloc(self.mining_snapshot.session_tokens_mined), self.mining_snapshot.session_blocks_mined)),
-            Print(format!("Last tx        : {}\n", self.mining_snapshot.last_signature.clone().unwrap_or_else(|| "-".to_string()))),
-            Print(format!("Last event     : {}\n", self.mining_snapshot.last_event)),
-            Print(format!("Console note   : {}\n", self.last_message)),
-        )?;
-
-        if height > 30 {
-            queue!(self.stdout, Print("\nRecent reports\n"))?;
-            if self.mining_snapshot.recent_reports.is_empty() {
-                queue!(self.stdout, Print("  waiting for clean hashrate samples...\n"))?;
-            } else {
-                for report in self.mining_snapshot.recent_reports.iter().take(4) {
-                    queue!(self.stdout, Print(format!("  {report}\n")))?;
-                }
-            }
+        if !self.wallet_is_funded() {
+            queue!(self.stdout, Print("\n"), Print(fit_line(&deposit_line, width)), Print("\n"))?;
         }
 
         self.stdout.flush()?;
@@ -796,36 +823,19 @@ fn clear_plain_screen() -> Result<()> {
     Ok(())
 }
 
-fn wrap_text(input: &str, max_width: usize) -> Vec<String> {
-    if max_width < 10 || input.len() <= max_width {
-        return vec![input.to_string()];
+fn fit_line(input: &str, width: u16) -> String {
+    let max_width = width.saturating_sub(1) as usize;
+    if max_width == 0 || input.len() <= max_width {
+        return input.to_string();
     }
 
-    let mut lines = Vec::new();
-    let mut current = String::new();
-
-    for part in input.split(" | ") {
-        let candidate = if current.is_empty() {
-            part.to_string()
-        } else {
-            format!("{current} | {part}")
-        };
-
-        if candidate.len() > max_width && !current.is_empty() {
-            lines.push(current);
-            current = part.to_string();
-        } else {
-            current = candidate;
+    let mut fitted = String::new();
+    for character in input.chars() {
+        if fitted.len().saturating_add(character.len_utf8()) >= max_width.saturating_sub(3) {
+            break;
         }
+        fitted.push(character);
     }
-
-    if !current.is_empty() {
-        lines.push(current);
-    }
-
-    if lines.is_empty() {
-        vec![input.to_string()]
-    } else {
-        lines
-    }
+    fitted.push_str("...");
+    fitted
 }

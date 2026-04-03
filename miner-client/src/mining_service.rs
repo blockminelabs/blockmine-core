@@ -189,6 +189,7 @@ impl LeaderboardReporter {
             Some(
                 Client::builder()
                     .timeout(Duration::from_secs(4))
+                    .user_agent("Blockmine Miner/1.0 (+https://blockmine.dev)")
                     .build()
                     .context("failed to build the leaderboard HTTP client")?,
             )
@@ -235,11 +236,14 @@ impl LeaderboardReporter {
         };
 
         if let (Some(client), Some(url)) = (&self.client, &self.ingest_url) {
-            let _ = client
+            let response = client
                 .post(url)
                 .json(&signed_payload)
                 .send()
                 .and_then(|response| response.error_for_status());
+            if response.is_err() {
+                return;
+            }
         }
 
         self.last_sent_at = Some(Instant::now());
