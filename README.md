@@ -64,7 +64,7 @@ The target is stored on-chain as a full 256-bit threshold. Reward issuance advan
 | Reward vault | `ApA17DcAYh7pVCcbUemQaDaqW1YxXaU62b73cUBHmdcS` |
 | Mint | `9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg` |
 | Treasury wallet | `8DVGdWLzDu8mXV8UuTPtqMpdST6PY2eoEAypK1fARCMb` |
-| Default RPC | `https://api.mainnet-beta.solana.com` |
+| Default RPC | `https://solana-rpc.publicnode.com` |
 | Fixed accepted-block fee | `0.01 SOL` |
 | Treasury BLOC share | `1%` |
 

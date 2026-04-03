@@ -147,7 +147,7 @@ blockmine-vast-worker
 
 Useful environment variables:
 
-- `BLOCKMINE_RPC_URL`
+- `BLOCKMINE_RPC_URL` (default: `https://solana-rpc.publicnode.com`)
 - `BLOCKMINE_PROGRAM_ID`
 - `BLOCKMINE_SITE_URL`
 - `BLOCKMINE_BACKEND`

@@ -23,7 +23,7 @@
 
 ## Public miner defaults
 
-- Default RPC: `https://api.mainnet-beta.solana.com`
+- Default RPC: `https://solana-rpc.publicnode.com`
 - Default program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
 
 ## Monetary constants

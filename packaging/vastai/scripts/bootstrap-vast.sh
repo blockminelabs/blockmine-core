@@ -4,7 +4,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 export BLOCKMINE_STORAGE_DIR="${BLOCKMINE_STORAGE_DIR:-/workspace/blockmine-data}"
 export BLOCKMINE_SITE_URL="${BLOCKMINE_SITE_URL:-https://blockmine.dev}"
-export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL:-https://api.mainnet-beta.solana.com}"
+export BLOCKMINE_RPC_URL="${BLOCKMINE_RPC_URL:-https://solana-rpc.publicnode.com}"
 export BLOCKMINE_PROGRAM_ID="${BLOCKMINE_PROGRAM_ID:-FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv}"
 export BLOCKMINE_LEADERBOARD_INGEST_URL="${BLOCKMINE_LEADERBOARD_INGEST_URL:-}"
 export BLOCKMINE_REPO_URL="${BLOCKMINE_REPO_URL:-https://github.com/blockminelabs/blockmine-core.git}"
