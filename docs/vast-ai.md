@@ -12,190 +12,178 @@
 
 # Vast.ai Mining
 
-Blockmine can run on Vast.ai as an interactive Linux mining console.
+Blockmine can run on Vast.ai as an interactive Linux mining rig.
 
-The public Vast template is designed so that every instance mines to its own wallet. No shared key is embedded in the image.
+The working path is:
 
-## Launch model
+1. launch the Blockmine template in `Jupyter + SSH`
+2. bootstrap the worker
+3. fix OpenCL manually if the instance does not expose it immediately
+4. open the Blockmine Vast console
+5. reveal the wallet, back up the recovery material, fund it, and start mining
 
-Use the Blockmine Vast template in:
+## Recommended template
 
-- `Jupyter + SSH` mode
-
-This gives the instance an interactive terminal. The Blockmine console uses that terminal once on first boot to reveal the recovery material only after explicit confirmation, then it stays open as a live mining dashboard.
-
-## Template source
-
-There are two valid template sources:
-
-1. a prebuilt Blockmine image
-2. a public bootstrap flow that starts from a public CUDA base image and pulls the public Blockmine core repository at boot
-
-The public bootstrap path exists so the template can be used immediately even before a dedicated container registry release is published.
-
-Recommended public bootstrap image:
+Image:
 
 - `nvidia/cuda:12.8.0-devel-ubuntu22.04`
 
-That CUDA floor matters for modern NVIDIA fleets. On Vast, RTX 5000-series / Blackwell inventory is matched against CUDA 12.8-compatible templates.
+Launch mode:
 
-Recommended public on-start command:
+- `Jupyter + SSH`
+
+On-start script:
 
 ```bash
 bash -lc "$(curl -fsSL https://raw.githubusercontent.com/blockminelabs/blockmine-core/main/packaging/vastai/scripts/bootstrap-vast.sh)"
 ```
 
-To watch the bootstrap progress from the terminal:
+Environment variables:
+
+```text
+BLOCKMINE_RPC_URL=https://solana-rpc.publicnode.com
+BLOCKMINE_PROGRAM_ID=FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv
+BLOCKMINE_SITE_URL=https://blockmine.dev
+BLOCKMINE_BACKEND=gpu
+BLOCKMINE_BATCH_SIZE=250000
+BLOCKMINE_GPU_BATCH_SIZE=1048576
+BLOCKMINE_CPU_THREADS=0
+BLOCKMINE_MIN_START_SOL=0.05
+BLOCKMINE_FUNDING_POLL_SECONDS=5
+BLOCKMINE_STORAGE_DIR=/workspace/blockmine-data
+BLOCKMINE_PLATFORM_DETAIL=Mining Rig - Vast.ai
+NVIDIA_VISIBLE_DEVICES=all
+NVIDIA_DRIVER_CAPABILITIES=all
+```
+
+## Full operator flow
+
+### 1. Open the instance terminal
+
+Open the Vast instance created from the Blockmine template, then enter the Jupyter terminal or SSH session.
+
+### 2. Bootstrap the worker
+
+```bash
+bash -lc "$(curl -fsSL https://raw.githubusercontent.com/blockminelabs/blockmine-core/main/packaging/vastai/scripts/bootstrap-vast.sh)"
+```
+
+### 3. If OpenCL is not visible immediately, initialize it manually
+
+```bash
+mkdir -p /etc/OpenCL/vendors
+printf 'libnvidia-opencl.so.1\n' >/etc/OpenCL/vendors/nvidia.icd
+
+cat >/etc/profile.d/blockmine-opencl.sh <<'EOF'
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors
+export OPENCL_VENDOR_PATH=/etc/OpenCL/vendors
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+EOF
+
+export OCL_ICD_VENDORS=/etc/OpenCL/vendors
+export OPENCL_VENDOR_PATH=/etc/OpenCL/vendors
+export LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}
+```
+
+### 4. Verify that the OpenCL GPUs are visible
+
+```bash
+clinfo -l
+```
+
+Expected result:
+
+- one NVIDIA platform
+- one device entry for each GPU in the rig
+
+### 5. Start the Blockmine Vast console
+
+```bash
+/workspace/blockmine-core/miner-client/target/release/blockmine-vast-console
+```
+
+### 6. First boot flow
+
+On first boot the console will:
+
+1. ask for `YES` before it reveals the recovery material
+2. show the wallet address, recovery phrase, and private key
+3. ask for `YES` again to confirm the backup
+4. show the deposit address, fee per accepted block, current era, and current reward
+
+Fund the wallet shown in the console with SOL.
+
+### 7. Console controls
+
+Inside the console:
+
+- `S` starts or stops mining
+- `W` withdraws `SOL` or `BLOC`
+- `R` refreshes the GPU probe
+- `Q` exits the console
+
+### 8. Reopen the console later
+
+```bash
+/workspace/blockmine-core/miner-client/target/release/blockmine-vast-console
+```
+
+### 9. Print only the wallet address
+
+```bash
+/workspace/blockmine-core/miner-client/target/release/blockmine-wallet address
+```
+
+### 10. Reveal the recovery material again
+
+```bash
+/workspace/blockmine-core/miner-client/target/release/blockmine-wallet reveal
+```
+
+### 11. Inspect the GPUs outside the console
+
+```bash
+nvidia-smi
+watch -n 1 nvidia-smi
+```
+
+## Bootstrap status
+
+If you want to watch the pull, dependency install, and Rust build:
 
 ```bash
 tail -f /workspace/blockmine-logs/bootstrap.log
 ```
 
-## First boot
+## What the console is supposed to show
 
-On first boot the container creates a dedicated worker wallet if one does not already exist in the instance storage directory.
+Once funded and running, the console reports:
 
-When the user opens a Jupyter terminal or SSH session, the Blockmine console launches automatically.
+- live rate
+- attempts
+- blocks mined
+- mined BLOC
+- current era
+- current block
+- current reward
+- difficulty
+- wallet balances
+- rig summary
+- OpenCL status
 
-If it does not, run:
+## Leaderboard behavior
 
-```bash
-blockmine-vast-console
-```
+Vast workers send the same signed heartbeat used by the desktop miner.
 
-The console will:
+When the worker is live, the public leaderboard shows:
 
-1. warn that the recovery material controls the mined funds
-2. require `YES` before showing the recovery material
-3. show the public address, recovery phrase, and private key
-4. require `YES` again to confirm that the recovery material has been stored
-5. clear the screen and open the live mining console
+- platform detail: `Mining Rig - Vast.ai`
+- hardware summary: for example `2x NVIDIA GeForce RTX 5090` or `8x NVIDIA GeForce RTX 5090`
 
-## Funding
+The worker can appear on the leaderboard before it finds the next block, as soon as the mining loop and heartbeat are both alive.
 
-Once the recovery material has been confirmed, the console prints:
+## Notes
 
-- the wallet address
-- the fixed accepted-block fee in SOL
-- the current gross block reward in BLOC
-- the current era
-- the current block number
-
-Send SOL to the worker wallet. The console polls the wallet balance live and starts mining automatically as soon as the balance is high enough.
-
-## Start behavior
-
-The Vast mining loop starts automatically after:
-
-- the wallet backup has been confirmed
-- the wallet has enough SOL to pay the accepted-block fee and transaction fees
-
-No manual `mine` command is required after that point.
-
-## Console controls
-
-Inside the live console:
-
-- `S` starts or stops mining
-- `W` opens the withdrawal flow for SOL and BLOC
-- `R` refreshes the GPU probe
-- `Q` exits the console
-
-The withdrawal flow accepts fixed amounts or `MAX`.
-
-## GPU detection
-
-The template probes both:
-
-- the NVIDIA runtime via `nvidia-smi`
-- the OpenCL device layer used by the Blockmine GPU miner
-
-Today the Linux GPU miner still uses OpenCL for the hashing backend. That means a Vast instance must expose:
-
-- the NVIDIA runtime
-- a usable OpenCL platform inside the container
-
-If the instance shows `nvidia-smi` but no OpenCL devices, the console stays alive and reports the mismatch instead of crashing.
-
-The Vast packaging now also:
-
-- installs `clinfo`
-- writes the NVIDIA ICD file under `/etc/OpenCL/vendors/nvidia.icd`
-- exports `OCL_ICD_VENDORS`, `OPENCL_VENDOR_PATH`, and a library path that includes `/usr/lib/x86_64-linux-gnu`
-
-If the instance shows NVIDIA hardware but no OpenCL devices, the template keeps the console live and waits instead of crashing the miner process.
-
-## Leaderboard
-
-The interactive console uses the same signed leaderboard heartbeat path as the desktop miner.
-
-Once the worker starts mining, it appears on the public leaderboard as:
-
-- platform: `Mining Rig - Vast.ai`
-- backend: `CPU`, `GPU`, or `BOTH`, depending on the worker configuration
-- hardware summary: the detected GPU fleet, for example `4x NVIDIA GeForce RTX 5090`
-
-The worker does not need to find a block first. It appears as soon as the mining loop is live and the heartbeat starts flowing.
-
-## Runtime controls
-
-The interactive console binary is:
-
-```bash
-blockmine-vast-console
-```
-
-The headless worker binary remains available for non-interactive use:
-
-```bash
-blockmine-vast-worker
-```
-
-Useful environment variables:
-
-- `BLOCKMINE_RPC_URL` (default: `https://solana-rpc.publicnode.com`)
-- `BLOCKMINE_PROGRAM_ID`
-- `BLOCKMINE_SITE_URL`
-- `BLOCKMINE_BACKEND`
-- `BLOCKMINE_BATCH_SIZE`
-- `BLOCKMINE_GPU_BATCH_SIZE`
-- `BLOCKMINE_CPU_THREADS`
-- `BLOCKMINE_GPU_PLATFORM`
-- `BLOCKMINE_GPU_DEVICE`
-- `BLOCKMINE_GPU_DEVICES`
-- `BLOCKMINE_GPU_LOCAL_WORK_SIZE`
-- `BLOCKMINE_MIN_START_SOL`
-- `BLOCKMINE_FUNDING_POLL_SECONDS`
-- `BLOCKMINE_STORAGE_DIR`
-- `BLOCKMINE_REPO_URL`
-- `BLOCKMINE_REPO_DIR`
-
-If `BLOCKMINE_GPU_DEVICES` is omitted, the Vast worker automatically arms every visible OpenCL GPU device.
-
-The worker reads protocol state from the Blockmine relay at `https://blockmine.dev/api/miner/state`. `BLOCKMINE_RPC_URL` remains the raw Solana RPC used for wallet reads, ATA checks, and transaction submission.
-
-## Wallet commands
-
-The image also includes:
-
-```bash
-blockmine-wallet ensure
-blockmine-wallet address
-blockmine-wallet keypair-path
-blockmine-wallet backup-status
-blockmine-wallet funding-hint
-blockmine-wallet reveal
-blockmine-vast-console
-```
-
-## Persistence
-
-The worker stores its wallet and backup marker under:
-
-- `BLOCKMINE_STORAGE_DIR`
-
-Default:
-
-- `/workspace/blockmine-data`
-
-If that directory is preserved, the worker keeps the same wallet across restarts.
+- The Linux GPU miner currently uses OpenCL.
+- `nvidia-smi` alone is not enough. A usable OpenCL platform must exist inside the container.
+- If the template boots with CUDA visible but OpenCL missing, the manual ICD fix above is the correct recovery path.

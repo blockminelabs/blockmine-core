@@ -7,6 +7,7 @@ use blockmine_program::{
     },
     state::{CurrentBlock, MinerStats, MiningSession, ProtocolConfig},
 };
+use reqwest::Url;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use solana_client::rpc_client::RpcClient;
@@ -35,6 +36,14 @@ pub fn is_miner_state_relay_url(value: &str) -> bool {
 pub fn normalize_raw_rpc_url(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() || is_miner_state_relay_url(trimmed) {
+        return PUBLICNODE_RPC_URL.to_string();
+    }
+
+    let Ok(parsed) = Url::parse(trimmed) else {
+        return PUBLICNODE_RPC_URL.to_string();
+    };
+
+    if !matches!(parsed.scheme(), "http" | "https") {
         PUBLICNODE_RPC_URL.to_string()
     } else {
         trimmed.to_string()
