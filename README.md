@@ -19,6 +19,7 @@
   <a href="docs/protocol.md"><img alt="Protocol" src="https://img.shields.io/badge/Protocol-f7931a?style=for-the-badge"></a>
   <a href="docs/architecture.md"><img alt="Architecture" src="https://img.shields.io/badge/Architecture-1f2937?style=for-the-badge"></a>
   <a href="docs/miner-client.md"><img alt="Miner" src="https://img.shields.io/badge/Miner-374151?style=for-the-badge"></a>
+  <a href="docs/vast-ai.md"><img alt="Vast.ai" src="https://img.shields.io/badge/Vast.ai-0f766e?style=for-the-badge"></a>
   <a href="docs/security-notes.md"><img alt="Security" src="https://img.shields.io/badge/Security-7c2d12?style=for-the-badge"></a>
   <a href="docs/tokenomics.md"><img alt="Tokenomics" src="https://img.shields.io/badge/Tokenomics-92400e?style=for-the-badge"></a>
   <a href="MINING_CURVE.md"><img alt="Mining Curve" src="https://img.shields.io/badge/Mining_Curve-b45309?style=for-the-badge"></a>
@@ -74,6 +75,7 @@ The target is stored on-chain as a full 256-bit threshold. Reward issuance advan
 | [docs/protocol.md](docs/protocol.md) | State machine, proof rule, submit path, stale rotation, challenge derivation |
 | [docs/architecture.md](docs/architecture.md) | Off-chain search vs on-chain settlement, account model, event trail |
 | [docs/miner-client.md](docs/miner-client.md) | CLI miner, desktop miner, wallet manager, CPU/GPU flow |
+| [docs/vast-ai.md](docs/vast-ai.md) | Vast.ai worker flow, wallet reveal, funding, and leaderboard behavior |
 | [docs/security-notes.md](docs/security-notes.md) | Core invariants, fee routing, vault routing, non-goals |
 | [docs/tokenomics.md](docs/tokenomics.md) | Supply, allocation, reward accounting, cap structure |
 | [MINING_CURVE.md](MINING_CURVE.md) | Exact era schedule and Scarcity tail |
@@ -102,7 +104,7 @@ The target is stored on-chain as a full 256-bit threshold. Reward issuance advan
 - `onchain/` - Anchor workspace and Solana program
 - `miner-client/` - Rust CLI miner and desktop client
 - `docs/` - technical notes for the public core
-- `packaging/` - Windows and macOS packaging helpers
+- `packaging/` - Windows, macOS, and Vast.ai packaging helpers
 - `scripts/` - local build wrappers
 
 ## Build
@@ -119,4 +121,10 @@ powershell -ExecutionPolicy Bypass -File .\packaging\windows\build-miner-exe.ps1
 chmod +x packaging/macos/*.command
 chmod +x packaging/macos/scripts/*.sh
 ./packaging/macos/build-macos.command
+```
+
+### Vast.ai image
+
+```bash
+docker build -f packaging/vastai/Dockerfile -t ghcr.io/blockminelabs/blockmine-vast:latest .
 ```

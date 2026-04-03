@@ -3,6 +3,7 @@
   <a href="protocol.md"><img alt="Protocol" src="https://img.shields.io/badge/Protocol-f7931a?style=for-the-badge"></a>
   <a href="architecture.md"><img alt="Architecture" src="https://img.shields.io/badge/Architecture-1f2937?style=for-the-badge"></a>
   <a href="miner-client.md"><img alt="Miner" src="https://img.shields.io/badge/Miner-374151?style=for-the-badge"></a>
+  <a href="vast-ai.md"><img alt="Vast.ai" src="https://img.shields.io/badge/Vast.ai-0f766e?style=for-the-badge"></a>
   <a href="security-notes.md"><img alt="Security" src="https://img.shields.io/badge/Security-7c2d12?style=for-the-badge"></a>
   <a href="tokenomics.md"><img alt="Tokenomics" src="https://img.shields.io/badge/Tokenomics-92400e?style=for-the-badge"></a>
   <a href="../MINING_CURVE.md"><img alt="Mining Curve" src="https://img.shields.io/badge/Mining_Curve-b45309?style=for-the-badge"></a>
@@ -17,6 +18,8 @@ The repository ships two public miner interfaces built from the same Rust codeba
 
 - `blockmine-miner` - command-line interface
 - `blockmine-studio` - desktop client for Windows and macOS
+- `blockmine-wallet` - worker-wallet utility for headless Vast.ai instances
+- `blockmine-vast-worker` - headless mining worker with signed leaderboard heartbeats
 
 Both use the same:
 
@@ -24,6 +27,8 @@ Both use the same:
 - RPC read path
 - proof rule
 - submission flow
+
+The Vast worker also uses the same signed heartbeat route as the desktop miner, so Linux workers appear on the public leaderboard as soon as the mining loop starts.
 
 ## Public defaults
 
@@ -115,6 +120,26 @@ GPU mode requires:
 - correct platform and device selection
 
 The GPU path and the CPU path use the same proof rule and the same submit path. Only the nonce-search engine changes.
+
+## Vast.ai worker
+
+The repository also includes a headless worker flow for Vast.ai:
+
+- `blockmine-wallet ensure`
+- `blockmine-wallet reveal`
+- `blockmine-wallet funding-hint`
+- `blockmine-vast-worker`
+
+The intended public template flow is:
+
+1. launch the worker in `Jupyter + SSH`
+2. generate or load the worker wallet
+3. reveal and confirm the recovery material
+4. fund the wallet with SOL
+5. start mining automatically
+6. broadcast signed heartbeats to the public leaderboard
+
+See [vast-ai.md](vast-ai.md) for the public runtime guide.
 
 ## Windows build
 

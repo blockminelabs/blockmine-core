@@ -38,6 +38,13 @@ struct RecoveryPhraseRecord {
 }
 
 pub fn app_storage_dir() -> Result<PathBuf> {
+    if let Ok(override_dir) = std::env::var("BLOCKMINE_STORAGE_DIR") {
+        let trimmed = override_dir.trim();
+        if !trimmed.is_empty() {
+            return Ok(PathBuf::from(trimmed));
+        }
+    }
+
     if let Some(data_dir) = dirs::data_local_dir() {
         return Ok(data_dir.join("BlockMine"));
     }

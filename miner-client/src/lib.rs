@@ -9,5 +9,6 @@ pub mod rpc;
 pub mod session_wallet;
 pub mod submitter;
 pub mod ui;
+pub mod vast_wallet;
 pub mod wallet;
 pub mod wallet_store;
