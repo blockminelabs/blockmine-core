@@ -309,7 +309,7 @@ fn worker_loop(
     config: &CliConfig,
     signer: Keypair,
     options: MiningRuntimeOptions,
-    stop_requested: &AtomicBool,
+    stop_requested: &Arc<AtomicBool>,
     sender: &mpsc::Sender<MiningUpdate>,
     latest_snapshot: &mut MiningSnapshot,
 ) -> Result<()> {
@@ -340,6 +340,28 @@ fn worker_loop(
     let mut offchain_hashrate_samples: VecDeque<(Instant, f64)> = VecDeque::new();
     let mut stable_offchain_hashrate_hps = 0.0f64;
     let mut last_block_refresh_at = Instant::now();
+    let (block_refresh_sender, block_refresh_receiver) = mpsc::channel();
+    let block_refresh_config = config.clone();
+    let block_refresh_stop = Arc::clone(stop_requested);
+    thread::Builder::new()
+        .name("blockmine-block-refresh".to_string())
+        .spawn(move || {
+            let rpc = RpcFacade::new(&block_refresh_config);
+            while !block_refresh_stop.load(Ordering::Relaxed) {
+                let update =
+                    fetch_current_block_with_retry(&rpc).map_err(|error| error.to_string());
+                let _ = block_refresh_sender.send(update);
+
+                let poll_chunks = ((BLOCK_REFRESH_INTERVAL.as_millis() / 100).max(1)) as usize;
+                for _ in 0..poll_chunks {
+                    if block_refresh_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+            }
+        })
+        .context("failed to spawn the block refresh thread")?;
     let mut state = WorkerState::new(
         options.backend,
         miner_pubkey.to_string(),
@@ -359,27 +381,23 @@ fn worker_loop(
     leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
 
     while !stop_requested.load(Ordering::Relaxed) {
-        let should_refresh_block = last_block_refresh_at.elapsed() >= BLOCK_REFRESH_INTERVAL
-            || should_rotate_stale_block(&current_block);
-        if should_refresh_block {
-            match fetch_current_block_with_retry(&rpc) {
+        while let Ok(update) = block_refresh_receiver.try_recv() {
+            match update {
                 Ok(block) => {
                     current_block = block;
                     last_block_refresh_at = Instant::now();
+                    state.snapshot.last_error = None;
                 }
                 Err(error) => {
-                    state.snapshot.status = "Waiting for relay state".to_string();
-                    state.snapshot.last_event = format!(
-                        "Retrying after RPC error: {}",
-                        first_line(&error.to_string())
-                    );
-                    state.snapshot.last_error = Some(error.to_string());
-                    state.emit(sender, latest_snapshot);
-                    leaderboard_reporter.maybe_send(&signer, &state.snapshot, false);
-                    thread::sleep(Duration::from_secs(2));
-                    continue;
+                    state.snapshot.last_error = Some(error);
                 }
             }
+        }
+
+        if last_block_refresh_at.elapsed() >= Duration::from_secs(8)
+            && state.snapshot.last_error.is_none()
+        {
+            state.snapshot.last_error = Some("Relay state refresh is delayed.".to_string());
         }
 
         if should_rotate_stale_block(&current_block) {
