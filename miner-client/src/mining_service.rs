@@ -368,7 +368,7 @@ fn worker_loop(
                     last_block_refresh_at = Instant::now();
                 }
                 Err(error) => {
-                    state.snapshot.status = "Waiting for Devnet RPC".to_string();
+                    state.snapshot.status = "Waiting for RPC pool".to_string();
                     state.snapshot.last_event = format!(
                         "Retrying after RPC error: {}",
                         first_line(&error.to_string())

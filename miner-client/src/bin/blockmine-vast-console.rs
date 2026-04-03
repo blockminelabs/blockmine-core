@@ -30,7 +30,7 @@ use solana_sdk::{
 };
 
 const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
-const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
+const DEFAULT_RPC_URL: &str = "auto";
 const DEFAULT_SITE_URL: &str = "https://blockmine.dev";
 
 #[derive(Debug, Parser, Clone)]

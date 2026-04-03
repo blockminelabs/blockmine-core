@@ -33,7 +33,7 @@ The Vast worker also uses the same signed heartbeat route as the desktop miner, 
 ## Public defaults
 
 - Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
-- Default RPC: `https://solana-rpc.publicnode.com`
+- Default RPC: `auto` (`https://api.mainnet-beta.solana.com`, fallback `https://solana-rpc.publicnode.com`)
 
 These defaults can be overridden with CLI flags.
 

@@ -18,7 +18,9 @@ use blockmine_miner::miner_loop::GpuDeviceSelection;
 use blockmine_miner::mining_service::{
     MiningHandle, MiningRuntimeOptions, MiningSnapshot, MiningUpdate,
 };
-use blockmine_miner::rpc::RpcFacade;
+use blockmine_miner::rpc::{
+    summarize_rpc_pool, RpcFacade, AUTO_RPC_INPUT, OFFICIAL_RPC_URL, PUBLICNODE_RPC_URL,
+};
 use blockmine_miner::session_wallet::{
     load_managed_wallet_balances, load_managed_wallets_balances,
     sweep_single_session_delegate_wallet, SessionBalanceSummary, SessionSweepSummary,
@@ -44,7 +46,7 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use sysinfo::System;
 
-const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
+const DEFAULT_RPC_URL: &str = AUTO_RPC_INPUT;
 const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
 const DEFAULT_BROWSER_MINE_URL: &str = "https://blockmine.dev/desktop-bridge";
 const TREASURY_FEE_PER_BLOCK_LAMPORTS: u64 = 10_000_000;
@@ -288,6 +290,8 @@ enum AddWalletMode {
 struct DesktopUiPreferences {
     #[serde(default)]
     selected_wallet_pubkey: Option<String>,
+    #[serde(default)]
+    rpc_url: String,
     batch_size: String,
     gpu_batch_size: String,
     cpu_threads: String,
@@ -604,7 +608,16 @@ impl BlockMineStudioApp {
             .or_else(|| available_wallets.first().cloned());
 
         let mut app = Self {
-            rpc_url: DEFAULT_RPC_URL.to_string(),
+            rpc_url: preferences
+                .as_ref()
+                .map(|prefs| {
+                    if prefs.rpc_url.trim().is_empty() {
+                        DEFAULT_RPC_URL.to_string()
+                    } else {
+                        prefs.rpc_url.clone()
+                    }
+                })
+                .unwrap_or_else(|| DEFAULT_RPC_URL.to_string()),
             program_id: DEFAULT_PROGRAM_ID.to_string(),
             browser_mine_url: DEFAULT_BROWSER_MINE_URL.to_string(),
             web3_deposit_sol: 0.6,
@@ -1172,6 +1185,7 @@ impl BlockMineStudioApp {
     fn persist_ui_preferences(&self) {
         if let Err(error) = save_desktop_ui_preferences(&DesktopUiPreferences {
             selected_wallet_pubkey: self.active_wallet.as_ref().map(|wallet| wallet.pubkey.clone()),
+            rpc_url: self.rpc_url.clone(),
             batch_size: self.batch_size.clone(),
             gpu_batch_size: self.gpu_batch_size.clone(),
             cpu_threads: self.cpu_threads.clone(),
@@ -1187,6 +1201,40 @@ impl BlockMineStudioApp {
         self.phantom_bridge_receiver = None;
         self.error = None;
         self.status = status.to_string();
+    }
+
+    fn trigger_rpc_refresh(&mut self) {
+        let now = Instant::now();
+        self.last_session_balance_refresh_at = now - ACTIVE_WALLET_REFRESH_INTERVAL;
+        self.last_wallet_list_balance_refresh_at = now - WALLET_MANAGER_REFRESH_INTERVAL;
+        self.last_current_block_refresh_at = now - Duration::from_secs(8);
+
+        if self.session_balance_receiver.is_none() {
+            self.start_session_balance_refresh();
+        }
+        if self.wallet_list_balance_receiver.is_none() {
+            self.start_wallet_list_balance_refresh();
+        }
+        if self.current_block_receiver.is_none() {
+            self.start_current_block_refresh();
+        }
+    }
+
+    fn apply_rpc_change(&mut self) {
+        if self.rpc_url.trim().is_empty() {
+            self.rpc_url = DEFAULT_RPC_URL.to_string();
+        }
+        self.persist_ui_preferences();
+        self.trigger_rpc_refresh();
+        self.error = None;
+        if self.mining_handle.is_some() {
+            self.status = format!(
+                "RPC pool updated: {}. Stop and restart mining to move the live worker.",
+                summarize_rpc_pool(&self.rpc_url)
+            );
+        } else {
+            self.status = format!("RPC pool updated: {}", summarize_rpc_pool(&self.rpc_url));
+        }
     }
 
     fn refresh_gpu_devices(&mut self) {
@@ -1720,6 +1768,8 @@ impl App for BlockMineStudioApp {
                     };
                     ui.colored_label(error_color, error);
                 }
+                ui.add_space(8.0);
+                render_top_rpc_bar(ui, self);
                 ui.add_space(10.0);
             });
 
@@ -3190,6 +3240,94 @@ fn render_brand_header(
             ui.heading(RichText::new("BlockMine").size(30.0).color(theme_text()));
         }
     });
+}
+
+fn current_rpc_preset_label(rpc_url: &str) -> &'static str {
+    let trimmed = rpc_url.trim();
+    if trimmed.eq_ignore_ascii_case(AUTO_RPC_INPUT) || trimmed.is_empty() {
+        "Auto"
+    } else if trimmed.eq_ignore_ascii_case(OFFICIAL_RPC_URL) {
+        "Solana Foundation"
+    } else if trimmed.eq_ignore_ascii_case(PUBLICNODE_RPC_URL) {
+        "PublicNode"
+    } else {
+        "Custom"
+    }
+}
+
+fn render_top_rpc_bar(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(RichText::new("RPC").size(12.0).color(theme_accent()));
+
+        egui::ComboBox::from_id_source("top_rpc_preset")
+            .selected_text(current_rpc_preset_label(&app.rpc_url))
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        app.rpc_url.trim().eq_ignore_ascii_case(AUTO_RPC_INPUT)
+                            || app.rpc_url.trim().is_empty(),
+                        "Auto",
+                    )
+                    .clicked()
+                {
+                    app.rpc_url = AUTO_RPC_INPUT.to_string();
+                }
+                if ui
+                    .selectable_label(
+                        app.rpc_url.trim().eq_ignore_ascii_case(OFFICIAL_RPC_URL),
+                        "Solana Foundation",
+                    )
+                    .clicked()
+                {
+                    app.rpc_url = OFFICIAL_RPC_URL.to_string();
+                }
+                if ui
+                    .selectable_label(
+                        app.rpc_url.trim().eq_ignore_ascii_case(PUBLICNODE_RPC_URL),
+                        "PublicNode",
+                    )
+                    .clicked()
+                {
+                    app.rpc_url = PUBLICNODE_RPC_URL.to_string();
+                }
+            });
+
+        ui.add_sized(
+            egui::vec2(360.0, 28.0),
+            TextEdit::singleline(&mut app.rpc_url)
+                .hint_text("auto or comma-separated RPC URLs"),
+        );
+
+        if ui
+            .add(
+                egui::Button::new(RichText::new("Apply RPC").color(theme_button_text()))
+                    .fill(theme_accent()),
+            )
+            .clicked()
+        {
+            app.apply_rpc_change();
+        }
+
+        if ui.button("Refresh").clicked() {
+            app.trigger_rpc_refresh();
+            app.error = None;
+            app.status = format!("Refreshing state via {}.", summarize_rpc_pool(&app.rpc_url));
+        }
+    });
+
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(format!("Pool: {}", summarize_rpc_pool(&app.rpc_url)))
+            .size(12.0)
+            .color(theme_muted()),
+    );
+    if app.mining_handle.is_some() {
+        ui.label(
+            RichText::new("Live mining keeps the current RPC until you stop and start the miner.")
+                .size(11.0)
+                .color(theme_muted()),
+        );
+    }
 }
 
 fn render_animated_texture(

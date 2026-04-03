@@ -186,7 +186,6 @@ fn send_instructions(
     instructions: Vec<Instruction>,
 ) -> Result<Signature> {
     let recent_blockhash = rpc
-        .client()
         .get_latest_blockhash()
         .context("failed to fetch latest blockhash")?;
     let tx = Transaction::new_signed_with_payer(
@@ -196,8 +195,7 @@ fn send_instructions(
         recent_blockhash,
     );
 
-    rpc.client()
-        .send_and_confirm_transaction(&tx)
+    rpc.send_and_confirm_transaction(&tx)
         .or_else(|send_error| {
             let simulation = rpc.client().simulate_transaction_with_config(
                 &tx,
@@ -235,8 +233,13 @@ fn ensure_associated_token_account(
     mint: Pubkey,
 ) -> Result<Pubkey> {
     let ata = get_associated_token_address(&owner, &mint);
-    if rpc.client().get_account(&ata).is_ok() {
-        return Ok(ata);
+    match rpc.account_exists(&ata) {
+        Ok(true) => return Ok(ata),
+        Ok(false) => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to load ATA {} for owner {}", ata, owner));
+        }
     }
 
     let instruction =

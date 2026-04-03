@@ -1,7 +1,6 @@
 use anchor_lang::AccountDeserialize;
 use anyhow::{Context, Result};
 use blockmine_program::{constants::CONFIG_SEED, state::ProtocolConfig};
-use solana_client::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     instruction::Instruction,
@@ -17,6 +16,7 @@ use spl_associated_token_account::{
 };
 use spl_token::instruction::transfer_checked;
 
+use crate::rpc::RpcFacade;
 use crate::wallet_store::{load_session_delegate_wallet, ManagedWallet};
 
 #[derive(Debug, Clone)]
@@ -70,9 +70,9 @@ pub fn sweep_single_session_delegate_wallet(
     requested_sol_lamports: u64,
     requested_bloc_raw: u64,
 ) -> Result<SessionSweepSummary> {
-    let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-    sweep_wallets_with_client(
-        &client,
+    let rpc = RpcFacade::from_parts(rpc_url, program_id, CommitmentConfig::confirmed());
+    sweep_wallets_with_rpc(
+        &rpc,
         program_id,
         &[wallet.clone()],
         recipient,
@@ -87,8 +87,8 @@ pub fn sweep_all_session_delegate_wallets(
     recipient: Pubkey,
 ) -> Result<SessionSweepSummary> {
     let wallets = list_session_delegate_wallets()?;
-    let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-    sweep_wallets_with_client(&client, program_id, &wallets, recipient, u64::MAX, 0)
+    let rpc = RpcFacade::from_parts(rpc_url, program_id, CommitmentConfig::confirmed());
+    sweep_wallets_with_rpc(&rpc, program_id, &wallets, recipient, u64::MAX, 0)
 }
 
 pub fn load_session_delegate_balances(
@@ -120,8 +120,8 @@ fn load_wallet_balances(
     program_id: Pubkey,
     wallets: &[ManagedWallet],
 ) -> Result<SessionBalanceSummary> {
-    let client = RpcClient::new_with_commitment(rpc_url.to_string(), CommitmentConfig::confirmed());
-    let protocol_config = fetch_protocol_config(&client, program_id)?;
+    let rpc = RpcFacade::from_parts(rpc_url, program_id, CommitmentConfig::confirmed());
+    let protocol_config = rpc.fetch_protocol_config()?;
     let mut balances = Vec::with_capacity(wallets.len());
     let mut total_balance_lamports = 0u64;
     let mut total_bloc_balance_raw = 0u64;
@@ -132,16 +132,16 @@ fn load_wallet_balances(
             .pubkey
             .parse::<Pubkey>()
             .with_context(|| format!("invalid wallet pubkey {}", wallet.pubkey))?;
-        let balance_lamports = client
+        let balance_lamports = rpc
             .get_balance(&wallet_pubkey)
             .with_context(|| format!("failed to fetch balance for {wallet_pubkey}"))?;
         let bloc_token_account =
             get_associated_token_address(&wallet_pubkey, &protocol_config.bloc_mint);
-        let bloc_balance_raw = client
-            .get_token_account_balance(&bloc_token_account)
-            .ok()
-            .and_then(|amount| amount.amount.parse::<u64>().ok())
-            .unwrap_or(0);
+        let bloc_balance_raw = rpc
+            .get_token_account_balance_raw(&bloc_token_account)
+            .with_context(|| {
+                format!("failed to fetch BLOC token balance for {}", bloc_token_account)
+            })?;
 
         if balance_lamports > 0 || bloc_balance_raw > 0 {
             funded_wallet_count += 1;
@@ -167,15 +167,15 @@ fn load_wallet_balances(
     })
 }
 
-fn sweep_wallets_with_client(
-    client: &RpcClient,
+fn sweep_wallets_with_rpc(
+    rpc: &RpcFacade,
     program_id: Pubkey,
     wallets: &[ManagedWallet],
     recipient: Pubkey,
     requested_sol_lamports: u64,
     requested_bloc_raw: u64,
 ) -> Result<SessionSweepSummary> {
-    let protocol_config = fetch_protocol_config(client, program_id)?;
+    let protocol_config = fetch_protocol_config(rpc, program_id)?;
     let mut summary = SessionSweepSummary {
         attempted: wallets.len(),
         swept: 0,
@@ -186,7 +186,7 @@ fn sweep_wallets_with_client(
 
     for wallet in wallets {
         let result = sweep_wallet_with_client(
-            client,
+            rpc,
             wallet,
             recipient,
             requested_sol_lamports,
@@ -209,7 +209,7 @@ fn sweep_wallets_with_client(
 }
 
 fn sweep_wallet_with_client(
-    client: &RpcClient,
+    rpc: &RpcFacade,
     wallet: &ManagedWallet,
     recipient: Pubkey,
     requested_sol_lamports: u64,
@@ -247,7 +247,7 @@ fn sweep_wallet_with_client(
         });
     }
 
-    let balance = match client
+    let balance = match rpc
         .get_balance(&wallet_pubkey)
         .with_context(|| format!("failed to fetch balance for {wallet_pubkey}"))
     {
@@ -265,10 +265,8 @@ fn sweep_wallet_with_client(
         }
     };
     let sender_bloc_ata = get_associated_token_address(&wallet_pubkey, &protocol_config.bloc_mint);
-    let bloc_balance_before = client
-        .get_token_account_balance(&sender_bloc_ata)
-        .ok()
-        .and_then(|amount| amount.amount.parse::<u64>().ok())
+    let bloc_balance_before = rpc
+        .get_token_account_balance_raw(&sender_bloc_ata)
         .unwrap_or(0);
 
     if balance == 0 && bloc_balance_before == 0 {
@@ -283,7 +281,7 @@ fn sweep_wallet_with_client(
         });
     }
 
-    let recent_blockhash = match client
+    let recent_blockhash = match rpc
         .get_latest_blockhash()
         .context("failed to fetch the latest blockhash for the sweep")
     {
@@ -302,10 +300,13 @@ fn sweep_wallet_with_client(
     };
 
     let recipient_bloc_ata = get_associated_token_address(&recipient, &protocol_config.bloc_mint);
-    let recipient_needs_bloc_ata =
-        requested_bloc_raw > 0 && client.get_account(&recipient_bloc_ata).is_err();
+    let recipient_needs_bloc_ata = requested_bloc_raw > 0
+        && match rpc.account_exists(&recipient_bloc_ata) {
+            Ok(exists) => !exists,
+            Err(_) => false,
+        };
     let ata_rent_lamports = if recipient_needs_bloc_ata {
-        client
+        rpc
             .get_minimum_balance_for_rent_exemption(spl_token::state::Account::LEN)
             .unwrap_or(0)
     } else {
@@ -375,7 +376,7 @@ fn sweep_wallet_with_client(
         Some(&wallet_pubkey),
         &recent_blockhash,
     );
-    let fee = client
+    let fee = rpc
         .get_fee_for_message(&message)
         .ok()
         .filter(|fee| *fee > 0)
@@ -481,7 +482,7 @@ fn sweep_wallet_with_client(
         &[&keypair],
         recent_blockhash,
     );
-    let signature = match client
+    let signature = match rpc
         .send_and_confirm_transaction(&transaction)
         .with_context(|| format!("failed to sweep session wallet {wallet_pubkey}"))
     {
@@ -510,9 +511,9 @@ fn sweep_wallet_with_client(
     })
 }
 
-fn fetch_protocol_config(client: &RpcClient, program_id: Pubkey) -> Result<ProtocolConfig> {
+fn fetch_protocol_config(rpc: &RpcFacade, program_id: Pubkey) -> Result<ProtocolConfig> {
     let (config_pda, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
-    let account = client
+    let account = rpc
         .get_account(&config_pda)
         .with_context(|| format!("protocol config {} not found", config_pda))?;
     let mut data = account.data.as_slice();
