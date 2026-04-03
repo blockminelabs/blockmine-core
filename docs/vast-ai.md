@@ -153,7 +153,7 @@ blockmine-vast-worker
 
 Useful environment variables:
 
-- `BLOCKMINE_RPC_URL` (default: `auto`, which currently tries `https://api.mainnet-beta.solana.com` then `https://solana-rpc.publicnode.com`)
+- `BLOCKMINE_RPC_URL` (default: `https://solana-rpc.publicnode.com`)
 - `BLOCKMINE_PROGRAM_ID`
 - `BLOCKMINE_SITE_URL`
 - `BLOCKMINE_BACKEND`
@@ -171,6 +171,8 @@ Useful environment variables:
 - `BLOCKMINE_REPO_DIR`
 
 If `BLOCKMINE_GPU_DEVICES` is omitted, the Vast worker automatically arms every visible OpenCL GPU device.
+
+The worker reads protocol state from the Blockmine relay at `https://blockmine.dev/api/miner/state`. `BLOCKMINE_RPC_URL` remains the raw Solana RPC used for wallet reads, ATA checks, and transaction submission.
 
 ## Wallet commands
 

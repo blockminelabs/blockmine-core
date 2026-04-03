@@ -23,7 +23,8 @@
 
 ## Public miner defaults
 
-- Default RPC: `auto` (`https://api.mainnet-beta.solana.com`, fallback `https://solana-rpc.publicnode.com`)
+- Miner state relay: `https://blockmine.dev/api/miner/state`
+- Default raw RPC: `https://solana-rpc.publicnode.com`
 - Default program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
 
 ## Monetary constants

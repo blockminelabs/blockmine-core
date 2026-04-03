@@ -42,6 +42,8 @@ Blockmine is a proof-of-work settlement protocol on Solana.
 
 The chain does not brute-force hashes. The chain publishes one canonical challenge, one canonical target, one canonical reward, and one canonical settlement path. CPU and GPU hardware search nonce space off-chain. The program verifies valid proofs, routes fees, pays BLOC rewards from a pre-funded vault, and opens the next logical block.
 
+Public miners do not poll Solana directly for the live protocol state at full frequency. They read the canonical protocol snapshot from the Blockmine relay at `https://blockmine.dev/api/miner/state`. Raw RPC remains in the miner for wallet balances, ATA checks, and transaction submission.
+
 The accepted proof is:
 
 ```text
@@ -64,7 +66,8 @@ The target is stored on-chain as a full 256-bit threshold. Reward issuance advan
 | Reward vault | `ApA17DcAYh7pVCcbUemQaDaqW1YxXaU62b73cUBHmdcS` |
 | Mint | `9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg` |
 | Treasury wallet | `8DVGdWLzDu8mXV8UuTPtqMpdST6PY2eoEAypK1fARCMb` |
-| Default RPC | `auto` (`https://api.mainnet-beta.solana.com`, fallback `https://solana-rpc.publicnode.com`) |
+| Miner state relay | `https://blockmine.dev/api/miner/state` |
+| Default raw RPC | `https://solana-rpc.publicnode.com` |
 | Fixed accepted-block fee | `0.01 SOL` |
 | Treasury BLOC share | `1%` |
 

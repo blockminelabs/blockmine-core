@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use crate::engine::BackendMode;
 
 const DEFAULT_PROGRAM_ID: &str = "FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv";
-const DEFAULT_RPC_URL: &str = "auto";
+const DEFAULT_RPC_URL: &str = "https://solana-rpc.publicnode.com";
 
 #[derive(Debug, Parser)]
 #[command(

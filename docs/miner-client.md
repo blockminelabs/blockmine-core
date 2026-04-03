@@ -24,7 +24,7 @@ The repository ships two public miner interfaces built from the same Rust codeba
 Both use the same:
 
 - program ID
-- RPC read path
+- protocol-state relay
 - proof rule
 - submission flow
 
@@ -33,9 +33,10 @@ The Vast worker also uses the same signed heartbeat route as the desktop miner, 
 ## Public defaults
 
 - Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
-- Default RPC: `auto` (`https://api.mainnet-beta.solana.com`, fallback `https://solana-rpc.publicnode.com`)
+- Miner state relay: `https://blockmine.dev/api/miner/state`
+- Default raw RPC: `https://solana-rpc.publicnode.com`
 
-These defaults can be overridden with CLI flags.
+The relay is used for the live protocol snapshot (`ProtocolConfig` and `CurrentBlock`). The raw RPC is used for balances, ATA discovery, and transaction submission. The raw RPC can be overridden with CLI flags or in the desktop client Advanced panel.
 
 ## Command-line interface
 

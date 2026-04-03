@@ -29,7 +29,15 @@ Runtime storage defaults to:
 
 - `/workspace/blockmine-data`
 
-The interactive console uses the same signed leaderboard heartbeat path as the desktop miner. When mining starts, the worker appears on the public leaderboard as a Linux miner.
+The interactive console uses the same signed leaderboard heartbeat path as the desktop miner. When mining starts, the worker appears on the public leaderboard with platform detail `Mining Rig - Vast.ai`.
+
+Public protocol state is read from the Blockmine relay:
+
+- `https://blockmine.dev/api/miner/state`
+
+The raw Solana RPC used for wallet reads and transaction submission defaults to:
+
+- `https://solana-rpc.publicnode.com`
 
 The on-start flow:
 
