@@ -54,10 +54,18 @@ impl RpcFacade {
     }
 
     pub fn fetch_anchor_account<T: AccountDeserialize>(&self, pubkey: &Pubkey) -> Result<T> {
-        let account = self
-            .client
-            .get_account(pubkey)
-            .with_context(|| format!("account {} not found", pubkey))?;
+        let account = self.client.get_account(pubkey).map_err(|error| {
+            let error_text = error.to_string();
+            if error_text.contains("429 Too Many Requests") || error_text.contains("403") {
+                anyhow::anyhow!(
+                    "RPC endpoint rejected the request while fetching account {}. The miner is likely being rate-limited or blocked by the current RPC. Original error: {}",
+                    pubkey,
+                    error_text
+                )
+            } else {
+                anyhow::anyhow!("account {} not found. Original RPC error: {}", pubkey, error_text)
+            }
+        })?;
         let mut data = account.data.as_slice();
         T::try_deserialize(&mut data).context("anchor account deserialization failed")
     }
