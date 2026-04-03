@@ -158,6 +158,8 @@ Useful environment variables:
 - `BLOCKMINE_REPO_URL`
 - `BLOCKMINE_REPO_DIR`
 
+If `BLOCKMINE_GPU_DEVICES` is omitted, the Vast worker automatically arms every visible OpenCL GPU device.
+
 ## Wallet commands
 
 The image also includes:

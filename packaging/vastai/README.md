@@ -63,6 +63,8 @@ That path:
 - installs the interactive auto-console flow
 - keeps the same wallet under `/workspace/blockmine-data`
 
+If `BLOCKMINE_GPU_DEVICES` is not set, the worker automatically uses every visible OpenCL GPU.
+
 Important:
 
 - the current Linux GPU miner still uses OpenCL

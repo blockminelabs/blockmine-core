@@ -306,6 +306,16 @@ fn cli_config(rpc: &str, program_id: &str) -> Result<CliConfig> {
 }
 
 fn parse_gpu_devices(values: &[String]) -> Result<Vec<GpuDeviceSelection>> {
+    if values.is_empty() {
+        return Ok(blockmine_miner::engine::gpu::list_devices()?
+            .into_iter()
+            .map(|device| GpuDeviceSelection {
+                platform_index: device.platform_index,
+                device_index: device.device_index,
+            })
+            .collect());
+    }
+
     let mut devices = Vec::new();
     for value in values {
         let trimmed = value.trim();
