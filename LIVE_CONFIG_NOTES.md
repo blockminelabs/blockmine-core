@@ -14,8 +14,11 @@
 ## Public mainnet references
 
 - Program ID: `FgRe73gAkZPhxpiCFHMYMfLR4dabDaB1FDVFazVTcCtv`
+- Vault authority PDA: `6yfyKscrWeqsB4bsjtRL9vw3hfFXsYcrhit4WyG91GUF`
+- Reward vault: `ApA17DcAYh7pVCcbUemQaDaqW1YxXaU62b73cUBHmdcS`
 - Mint: `9AJa38FiS8kD2n2Ztubrk6bCSYt55Lz2fBye3Comu1mg`
 - Treasury wallet: `8DVGdWLzDu8mXV8UuTPtqMpdST6PY2eoEAypK1fARCMb`
+- Treasury ATA: `Db4mNDjDJocoGC3Vi7RNaiApxjhyRDzmmgbfbdDWXUJi`
 
 ## Public miner defaults
 
