@@ -284,6 +284,12 @@ enum AddWalletMode {
     PrivateKey,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryMaterialKind {
+    SeedPhrase,
+    PrivateKey,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DesktopUiPreferences {
     #[serde(default)]
@@ -531,6 +537,8 @@ struct BlockMineStudioApp {
     show_seed_phrase_modal: bool,
     show_add_wallet_modal: bool,
     show_delete_wallet_modal: bool,
+    recovery_material_kind: RecoveryMaterialKind,
+    recovery_material_text: String,
     deposit_method: DepositMethod,
     deposit_modal_step: DepositModalStep,
     add_wallet_mode: AddWalletMode,
@@ -662,6 +670,8 @@ impl BlockMineStudioApp {
             show_seed_phrase_modal: false,
             show_add_wallet_modal: false,
             show_delete_wallet_modal: false,
+            recovery_material_kind: RecoveryMaterialKind::SeedPhrase,
+            recovery_material_text: initial_seed_phrase.clone(),
             deposit_method: DepositMethod::Web3Wallet,
             deposit_modal_step: DepositModalStep::Picker,
             add_wallet_mode: AddWalletMode::SeedPhrase,
@@ -859,6 +869,8 @@ impl BlockMineStudioApp {
                 self.select_active_wallet(wallet.clone());
                 if let Ok(Some(phrase)) = load_wallet_seed_phrase(&wallet) {
                     self.seed_phrase_words = split_seed_phrase_words(&phrase);
+                    self.recovery_material_kind = RecoveryMaterialKind::SeedPhrase;
+                    self.recovery_material_text = phrase;
                     self.seed_phrase_revealed = false;
                     self.seed_phrase_revealed_once = false;
                     self.seed_phrase_requires_ack = true;
@@ -922,9 +934,15 @@ impl BlockMineStudioApp {
             return;
         };
 
-        match load_wallet_seed_phrase(wallet) {
-            Ok(Some(phrase)) => {
-                self.seed_phrase_words = split_seed_phrase_words(&phrase);
+        match load_wallet_recovery_material(wallet) {
+            Ok((kind, material)) => {
+                self.recovery_material_kind = kind;
+                self.recovery_material_text = material.clone();
+                self.seed_phrase_words = if matches!(kind, RecoveryMaterialKind::SeedPhrase) {
+                    split_seed_phrase_words(&material)
+                } else {
+                    Vec::new()
+                };
                 self.seed_phrase_revealed = false;
                 self.seed_phrase_revealed_once = false;
                 self.seed_phrase_requires_ack = require_ack;
@@ -932,14 +950,8 @@ impl BlockMineStudioApp {
                 self.show_seed_phrase_modal = true;
                 self.error = None;
             }
-            Ok(None) => {
-                self.error = Some(
-                    "This wallet was created before recovery phrases were enabled. Move the funds to a fresh wallet before mainnet."
-                        .to_string(),
-                );
-            }
             Err(error) => {
-                self.error = Some(format!("Failed to load the recovery phrase: {error}"));
+                self.error = Some(format!("Failed to load the recovery material: {error}"));
             }
         }
     }
@@ -1963,7 +1975,37 @@ impl App for BlockMineStudioApp {
 
         if self.show_seed_phrase_modal {
             let mut open = true;
-            egui::Window::new("Recovery phrase")
+            let is_seed_phrase = matches!(self.recovery_material_kind, RecoveryMaterialKind::SeedPhrase);
+            let window_title = if is_seed_phrase {
+                "Recovery phrase"
+            } else {
+                "Recovery key"
+            };
+            let description = if is_seed_phrase {
+                "These words recover the desktop mining wallet. Keep them offline and private."
+            } else {
+                "This private key recovers the desktop mining wallet. Keep it offline and private."
+            };
+            let reveal_label = if self.seed_phrase_revealed {
+                if is_seed_phrase { "Hide phrase" } else { "Hide key" }
+            } else if is_seed_phrase {
+                "Show phrase"
+            } else {
+                "Show key"
+            };
+            let copy_label = if is_seed_phrase { "Copy phrase" } else { "Copy key" };
+            let hover_copy = if is_seed_phrase {
+                "Copy the recovery phrase"
+            } else {
+                "Copy the private key"
+            };
+            let revealed_status = if is_seed_phrase {
+                "Recovery phrase copied. Store it somewhere safe and offline."
+            } else {
+                "Recovery key copied. Store it somewhere safe and offline."
+            };
+
+            egui::Window::new(window_title)
                 .collapsible(false)
                 .resizable(false)
                 .default_width(620.0)
@@ -1971,16 +2013,8 @@ impl App for BlockMineStudioApp {
                 .show(ctx, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            RichText::new(
-                                "These words recover the desktop mining wallet. Keep them offline and private."
-                            )
-                            .color(theme_muted()),
+                            RichText::new(description).color(theme_muted()),
                         );
-                        let reveal_label = if self.seed_phrase_revealed {
-                            "Hide phrase"
-                        } else {
-                            "Show phrase"
-                        };
                         if ui
                             .add(
                                 egui::Button::new(
@@ -2006,27 +2040,42 @@ impl App for BlockMineStudioApp {
                         .rounding(egui::Rounding::same(18.0))
                         .inner_margin(egui::Margin::same(16.0))
                         .show(ui, |ui| {
-                            egui::Grid::new("seed_phrase_grid")
-                                .num_columns(2)
-                                .spacing(egui::vec2(14.0, 12.0))
-                                .show(ui, |ui| {
-                                    for (index, word) in self.seed_phrase_words.iter().enumerate() {
-                                        let display_word = if self.seed_phrase_revealed {
-                                            word.clone()
-                                        } else {
-                                            "Hidden".to_string()
-                                        };
-                                        ui.label(
-                                            RichText::new(format!("{:02}. {}", index + 1, display_word))
-                                                .monospace()
-                                                .color(theme_text())
-                                                .size(18.0),
-                                        );
-                                        if index % 2 == 1 {
-                                            ui.end_row();
+                            if is_seed_phrase {
+                                egui::Grid::new("seed_phrase_grid")
+                                    .num_columns(2)
+                                    .spacing(egui::vec2(14.0, 12.0))
+                                    .show(ui, |ui| {
+                                        for (index, word) in self.seed_phrase_words.iter().enumerate() {
+                                            let display_word = if self.seed_phrase_revealed {
+                                                word.clone()
+                                            } else {
+                                                "Hidden".to_string()
+                                            };
+                                            ui.label(
+                                                RichText::new(format!("{:02}. {}", index + 1, display_word))
+                                                    .monospace()
+                                                    .color(theme_text())
+                                                    .size(18.0),
+                                            );
+                                            if index % 2 == 1 {
+                                                ui.end_row();
+                                            }
                                         }
-                                    }
-                                });
+                                    });
+                            } else {
+                                let mut display_value = if self.seed_phrase_revealed {
+                                    self.recovery_material_text.clone()
+                                } else {
+                                    "Hidden".to_string()
+                                };
+                                ui.add(
+                                    TextEdit::multiline(&mut display_value)
+                                        .desired_width(f32::INFINITY)
+                                        .desired_rows(4)
+                                        .font(egui::TextStyle::Monospace)
+                                        .interactive(false),
+                                );
+                            }
                         });
                     ui.add_space(12.0);
                     ui.horizontal_wrapped(|ui| {
@@ -2034,29 +2083,29 @@ impl App for BlockMineStudioApp {
                             .add_enabled(
                                 self.seed_phrase_revealed,
                                 egui::Button::new(
-                                    RichText::new("Copy phrase").color(theme_button_text()),
+                                    RichText::new(copy_label).color(theme_button_text()),
                                 )
                                 .fill(theme_accent())
                                 .min_size(egui::vec2(160.0, 38.0))
                             )
                             .on_hover_text(if self.seed_phrase_revealed {
-                                "Copy the recovery phrase"
-                            } else {
+                                hover_copy
+                            } else if is_seed_phrase {
                                 "Reveal the recovery phrase first"
+                            } else {
+                                "Reveal the private key first"
                             })
                             .clicked()
                         {
-                            ui.ctx().copy_text(self.seed_phrase_words.join(" "));
-                            self.status =
-                                "Recovery phrase copied. Store it somewhere safe and offline."
-                                    .to_string();
+                            ui.ctx().copy_text(self.recovery_material_text.clone());
+                            self.status = revealed_status.to_string();
                             self.error = None;
                         }
                         if self.seed_phrase_requires_ack {
                             if ui
                                 .add_enabled(
                                     self.seed_phrase_revealed_once,
-                                    egui::Button::new("I saved the recovery phrase")
+                                    egui::Button::new("I saved the recovery material")
                                         .min_size(egui::vec2(220.0, 38.0)),
                                 )
                                 .clicked()
@@ -2703,6 +2752,18 @@ fn split_seed_phrase_words(phrase: &str) -> Vec<String> {
         .map(|word| word.trim().to_string())
         .filter(|word| !word.is_empty())
         .collect()
+}
+
+fn load_wallet_recovery_material(wallet: &ManagedWallet) -> Result<(RecoveryMaterialKind, String)> {
+    if let Some(phrase) = load_wallet_seed_phrase(wallet)? {
+        return Ok((RecoveryMaterialKind::SeedPhrase, phrase));
+    }
+
+    let keypair = load_managed_keypair(wallet)?;
+    Ok((
+        RecoveryMaterialKind::PrivateKey,
+        bs58::encode(keypair.to_bytes()).into_string(),
+    ))
 }
 
 fn detect_cpu_model() -> String {
@@ -3770,7 +3831,7 @@ fn render_live_telemetry_card(ui: &mut egui::Ui, app: &mut BlockMineStudioApp) {
 
 fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
     card_frame(ui, "Mining stats", |ui| {
-        ui.columns(4, |columns| {
+        ui.columns(5, |columns| {
             metric_chip(
                 &mut columns[0],
                 "Live rate",
@@ -3786,7 +3847,12 @@ fn render_hashrate_signal_card(ui: &mut egui::Ui, app: &BlockMineStudioApp) {
                 "Blocks mined",
                 app.latest_snapshot.session_blocks_mined.to_string(),
             );
-            metric_chip(&mut columns[3], "Runtime", app.runtime_label());
+            metric_chip(
+                &mut columns[3],
+                "$BLOC mined",
+                format_bloc_trimmed(app.latest_snapshot.session_tokens_mined),
+            );
+            metric_chip(&mut columns[4], "Runtime", app.runtime_label());
         });
 
         ui.add_space(14.0);
