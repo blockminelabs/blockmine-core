@@ -15,6 +15,7 @@ use spl_associated_token_account::{
     get_associated_token_address, instruction::create_associated_token_account_idempotent,
 };
 use spl_token::instruction::transfer_checked;
+use std::collections::HashMap;
 
 use crate::rpc::RpcFacade;
 use crate::wallet_store::{load_session_delegate_wallet, ManagedWallet};
@@ -122,26 +123,57 @@ fn load_wallet_balances(
 ) -> Result<SessionBalanceSummary> {
     let rpc = RpcFacade::from_parts(rpc_url, program_id, CommitmentConfig::confirmed());
     let protocol_config = rpc.fetch_protocol_config()?;
+    let wallet_pubkeys = wallets
+        .iter()
+        .map(|wallet| {
+            wallet
+                .pubkey
+                .parse::<Pubkey>()
+                .with_context(|| format!("invalid wallet pubkey {}", wallet.pubkey))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let relay_balances = rpc
+        .fetch_wallet_balances(&wallet_pubkeys)
+        .ok()
+        .map(|relay| {
+            relay
+                .balances
+                .into_iter()
+                .map(|entry| (entry.owner.clone(), entry))
+                .collect::<HashMap<_, _>>()
+        });
     let mut balances = Vec::with_capacity(wallets.len());
     let mut total_balance_lamports = 0u64;
     let mut total_bloc_balance_raw = 0u64;
     let mut funded_wallet_count = 0usize;
 
-    for wallet in wallets {
-        let wallet_pubkey = wallet
-            .pubkey
-            .parse::<Pubkey>()
-            .with_context(|| format!("invalid wallet pubkey {}", wallet.pubkey))?;
-        let balance_lamports = rpc
-            .get_balance(&wallet_pubkey)
-            .with_context(|| format!("failed to fetch balance for {wallet_pubkey}"))?;
-        let bloc_token_account =
-            get_associated_token_address(&wallet_pubkey, &protocol_config.bloc_mint);
-        let bloc_balance_raw = rpc
-            .get_token_account_balance_raw(&bloc_token_account)
-            .with_context(|| {
-                format!("failed to fetch BLOC token balance for {}", bloc_token_account)
-            })?;
+    for wallet_pubkey in wallet_pubkeys.iter() {
+        let fallback_ata = get_associated_token_address(wallet_pubkey, &protocol_config.bloc_mint);
+        let (balance_lamports, bloc_token_account, bloc_balance_raw) =
+            if let Some(entry) = relay_balances
+                .as_ref()
+                .and_then(|items| items.get(&wallet_pubkey.to_string()))
+            {
+                let token_account = entry
+                    .bloc_token_account
+                    .parse::<Pubkey>()
+                    .unwrap_or(fallback_ata);
+                (
+                    entry.sol_balance_lamports.parse::<u64>().unwrap_or(0),
+                    token_account,
+                    entry.bloc_balance_raw.parse::<u64>().unwrap_or(0),
+                )
+            } else {
+                let balance_lamports = rpc
+                    .get_balance(wallet_pubkey)
+                    .with_context(|| format!("failed to fetch balance for {wallet_pubkey}"))?;
+                let bloc_balance_raw = rpc
+                    .get_token_account_balance_raw(&fallback_ata)
+                    .with_context(|| {
+                        format!("failed to fetch BLOC token balance for {}", fallback_ata)
+                    })?;
+                (balance_lamports, fallback_ata, bloc_balance_raw)
+            };
 
         if balance_lamports > 0 || bloc_balance_raw > 0 {
             funded_wallet_count += 1;
@@ -149,7 +181,7 @@ fn load_wallet_balances(
             total_bloc_balance_raw = total_bloc_balance_raw.saturating_add(bloc_balance_raw);
         }
         balances.push(SessionWalletBalance {
-            wallet_pubkey,
+            wallet_pubkey: *wallet_pubkey,
             balance_lamports,
             bloc_token_account,
             bloc_balance_raw,

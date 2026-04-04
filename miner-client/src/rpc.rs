@@ -25,6 +25,8 @@ use crate::config::CliConfig;
 
 pub const PUBLICNODE_RPC_URL: &str = "https://solana-rpc.publicnode.com";
 pub const MINER_STATE_RELAY_URL: &str = "https://blockmine.dev/api/miner/state";
+pub const MINER_WALLET_BALANCES_RELAY_URL: &str =
+    "https://blockmine.dev/api/miner/wallet-balances";
 
 pub fn is_miner_state_relay_url(value: &str) -> bool {
     let normalized = value.trim().trim_end_matches('/').to_ascii_lowercase();
@@ -148,6 +150,32 @@ struct RelayCurrentBlock {
     solved_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct WalletBalancesRelayResponse {
+    ok: bool,
+    pub config: RelayWalletBalancesConfig,
+    pub balances: Vec<RelayWalletBalance>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RelayWalletBalancesConfig {
+    #[serde(rename = "blocMint")]
+    pub bloc_mint: String,
+    #[serde(rename = "tokenDecimals")]
+    pub token_decimals: u8,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RelayWalletBalance {
+    pub owner: String,
+    #[serde(rename = "solBalanceLamports")]
+    pub sol_balance_lamports: String,
+    #[serde(rename = "blocTokenAccount")]
+    pub bloc_token_account: String,
+    #[serde(rename = "blocBalanceRaw")]
+    pub bloc_balance_raw: String,
+}
+
 impl RpcFacade {
     pub fn new(config: &CliConfig) -> Self {
         Self::from_parts(&normalize_raw_rpc_url(&config.rpc_url), config.program_id, config.commitment)
@@ -174,6 +202,38 @@ impl RpcFacade {
 
     pub fn fetch_current_block(&self) -> Result<CurrentBlock> {
         Ok(self.fetch_relay_state()?.current_block.try_into()?)
+    }
+
+    pub fn fetch_wallet_balances(
+        &self,
+        owners: &[Pubkey],
+    ) -> Result<WalletBalancesRelayResponse> {
+        let mut url = Url::parse(MINER_WALLET_BALANCES_RELAY_URL)
+            .context("failed to build wallet balance relay url")?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for owner in owners {
+                pairs.append_pair("owner", &owner.to_string());
+            }
+        }
+
+        let response = self
+            .relay_client
+            .get(url)
+            .send()
+            .context("failed to request wallet balance relay")?
+            .error_for_status()
+            .context("wallet balance relay returned an error status")?;
+
+        let relay: WalletBalancesRelayResponse = response
+            .json()
+            .context("failed to decode wallet balance relay response")?;
+
+        if !relay.ok {
+            anyhow::bail!("wallet balance relay returned ok=false");
+        }
+
+        Ok(relay)
     }
 
     pub fn fetch_miner_stats(&self, miner: &Pubkey) -> Result<MinerStats> {
