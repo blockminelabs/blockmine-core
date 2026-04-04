@@ -1041,11 +1041,17 @@ impl BlockMineStudioApp {
     }
 
     fn wallet_delete_block_reason(&self, wallet: &ManagedWallet) -> Option<String> {
-        let summary = self.wallet_list_balance_summary.as_ref()?;
+        let Some(summary) = self.wallet_list_balance_summary.as_ref() else {
+            return Some("Wait for wallet balances to load before deleting a wallet.".to_string());
+        };
         let balance = summary
             .balances
             .iter()
-            .find(|candidate| candidate.wallet_pubkey.to_string() == wallet.pubkey)?;
+            .find(|candidate| candidate.wallet_pubkey.to_string() == wallet.pubkey);
+
+        let Some(balance) = balance else {
+            return Some("Wait for wallet balances to load before deleting a wallet.".to_string());
+        };
 
         if balance.balance_lamports > 0 || balance.bloc_balance_raw > 0 {
             Some("Withdraw all SOL and BLOC before deleting this wallet.".to_string())
