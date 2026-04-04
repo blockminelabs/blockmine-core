@@ -52,33 +52,4 @@ pub mod blockmine_program {
         rotate_stale_block::handler(ctx)
     }
 
-    pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
-        admin::set_paused_handler(ctx, paused)
-    }
-
-    pub fn rotate_admin(ctx: Context<RotateAdmin>, new_admin: Pubkey) -> Result<()> {
-        admin::rotate_admin_handler(ctx, new_admin)
-    }
-
-    pub fn update_difficulty_params(
-        ctx: Context<UpdateDifficultyParams>,
-        args: UpdateDifficultyParamsArgs,
-    ) -> Result<()> {
-        admin::update_difficulty_params_handler(ctx, args)
-    }
-
-    pub fn update_runtime_params(
-        ctx: Context<UpdateRuntimeParams>,
-        args: UpdateRuntimeParamsArgs,
-    ) -> Result<()> {
-        admin::update_runtime_params_handler(ctx, args)
-    }
-
-    pub fn update_treasury_accounts(ctx: Context<UpdateTreasuryAccounts>) -> Result<()> {
-        admin::update_treasury_accounts_handler(ctx)
-    }
-
-    pub fn reset_protocol(ctx: Context<ResetProtocol>) -> Result<()> {
-        admin::reset_protocol_handler(ctx)
-    }
 }
