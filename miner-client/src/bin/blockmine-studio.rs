@@ -962,6 +962,11 @@ impl BlockMineStudioApp {
             return;
         }
 
+        if let Some(reason) = self.wallet_delete_block_reason(&wallet) {
+            self.error = Some(reason);
+            return;
+        }
+
         self.pending_wallet_delete = Some(wallet);
         self.show_delete_wallet_modal = true;
         self.error = None;
@@ -977,6 +982,13 @@ impl BlockMineStudioApp {
             self.show_delete_wallet_modal = false;
             return;
         };
+
+        if let Some(reason) = self.wallet_delete_block_reason(&wallet) {
+            self.error = Some(reason);
+            self.show_delete_wallet_modal = false;
+            self.pending_wallet_delete = None;
+            return;
+        }
 
         match delete_managed_wallet(&wallet) {
             Ok(()) => {
@@ -1025,6 +1037,20 @@ impl BlockMineStudioApp {
             Err(error) => {
                 self.error = Some(format!("Failed to delete wallet: {error}"));
             }
+        }
+    }
+
+    fn wallet_delete_block_reason(&self, wallet: &ManagedWallet) -> Option<String> {
+        let summary = self.wallet_list_balance_summary.as_ref()?;
+        let balance = summary
+            .balances
+            .iter()
+            .find(|candidate| candidate.wallet_pubkey.to_string() == wallet.pubkey)?;
+
+        if balance.balance_lamports > 0 || balance.bloc_balance_raw > 0 {
+            Some("Withdraw all SOL and BLOC before deleting this wallet.".to_string())
+        } else {
+            None
         }
     }
 
@@ -2145,6 +2171,10 @@ impl App for BlockMineStudioApp {
                         .as_ref()
                         .map(|wallet| wallet.pubkey.clone())
                         .unwrap_or_else(|| "Unknown wallet".to_string());
+                    let delete_block_reason = self
+                        .pending_wallet_delete
+                        .as_ref()
+                        .and_then(|wallet| self.wallet_delete_block_reason(wallet));
                     ui.label(
                         RichText::new(
                             "Are you sure? This action is irreversible. Without a saved recovery phrase or private key, you will not be able to recover this wallet again."
@@ -2158,16 +2188,26 @@ impl App for BlockMineStudioApp {
                             .strong()
                             .monospace(),
                     );
+                    if let Some(reason) = &delete_block_reason {
+                        ui.add_space(8.0);
+                        ui.label(RichText::new(reason).color(theme_error()));
+                    }
                     ui.add_space(14.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui
-                            .add(
+                            .add_enabled(
+                                delete_block_reason.is_none(),
                                 egui::Button::new(
                                     RichText::new("Delete wallet")
                                         .color(theme_button_text()),
                                 )
                                 .fill(theme_danger_soft())
                                 .min_size(egui::vec2(160.0, 38.0)),
+                            )
+                            .on_hover_text(
+                                delete_block_reason.as_deref().unwrap_or(
+                                    "Delete this wallet from local storage",
+                                ),
                             )
                             .clicked()
                         {
@@ -2256,8 +2296,8 @@ impl App for BlockMineStudioApp {
                                             .rounding(egui::Rounding::same(16.0))
                                             .inner_margin(egui::Margin::same(14.0))
                                             .show(ui, |ui| {
-                                                ui.horizontal(|ui| {
-                                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.vertical(|ui| {
                                                         ui.label(
                                                             RichText::new(
                                                                 format_wallet_display_label(&wallet),
@@ -2303,13 +2343,17 @@ impl App for BlockMineStudioApp {
                                                                     .color(theme_muted()),
                                                             );
                                                         }
-                                                    });
-                                                    ui.with_layout(
-                                                        egui::Layout::right_to_left(Align::Center),
-                                                        |ui| {
+                                            });
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(Align::Center),
+                                                |ui| {
+                                                            let delete_block_reason =
+                                                                self.wallet_delete_block_reason(&wallet);
                                                             if ui
                                                                 .add_enabled(
-                                                                    self.mining_handle.is_none(),
+                                                                    self.mining_handle.is_none()
+                                                                        && delete_block_reason
+                                                                            .is_none(),
                                                                     egui::Button::new(
                                                                         RichText::new("Delete")
                                                                             .size(11.0)
@@ -2318,7 +2362,11 @@ impl App for BlockMineStudioApp {
                                                                     .fill(theme_danger_soft())
                                                                     .min_size(egui::vec2(78.0, 30.0)),
                                                                 )
-                                                                .on_hover_text("Delete this wallet from local storage")
+                                                                .on_hover_text(
+                                                                    delete_block_reason.as_deref().unwrap_or(
+                                                                        "Delete this wallet from local storage",
+                                                                    ),
+                                                                )
                                                                 .clicked()
                                                             {
                                                                 wallet_to_delete = Some(wallet.clone());
