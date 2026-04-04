@@ -24,6 +24,7 @@ use solana_sdk::{
 use crate::config::CliConfig;
 
 pub const PUBLICNODE_RPC_URL: &str = "https://solana-rpc.publicnode.com";
+pub const SOLANA_MAINNET_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 pub const MINER_STATE_RELAY_URL: &str = "https://blockmine.dev/api/miner/state";
 pub const MINER_WALLET_BALANCES_RELAY_URL: &str =
     "https://blockmine.dev/api/miner/wallet-balances";
@@ -249,10 +250,7 @@ impl RpcFacade {
     }
 
     pub fn fetch_anchor_account<T: AccountDeserialize>(&self, pubkey: &Pubkey) -> Result<T> {
-        let account = self
-            .client
-            .get_account(pubkey)
-            .map_err(|error| explain_rpc_fetch_error(pubkey, &error.to_string()))?;
+        let account = self.get_account(pubkey)?;
         let mut data = account.data.as_slice();
         T::try_deserialize(&mut data).context("anchor account deserialization failed")
     }
@@ -260,6 +258,18 @@ impl RpcFacade {
     pub fn get_account(&self, pubkey: &Pubkey) -> Result<Account> {
         self.client
             .get_account(pubkey)
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .get_account(pubkey)
+                    .map_err(|fallback_error| {
+                        explain_rpc_fetch_error(
+                            pubkey,
+                            &format!(
+                                "primary RPC failed ({primary_error}); fallback RPC failed ({fallback_error})"
+                            ),
+                        )
+                    })
+            })
             .map_err(|error| explain_rpc_fetch_error(pubkey, &error.to_string()))
     }
 
@@ -274,39 +284,93 @@ impl RpcFacade {
     pub fn get_balance(&self, pubkey: &Pubkey) -> Result<u64> {
         self.client
             .get_balance(pubkey)
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .get_balance(pubkey)
+                    .with_context(|| {
+                        format!(
+                            "failed to fetch balance for {pubkey} from primary RPC ({primary_error}) and fallback RPC"
+                        )
+                    })
+            })
             .with_context(|| format!("failed to fetch balance for {pubkey}"))
     }
 
     pub fn get_token_account_balance_raw(&self, pubkey: &Pubkey) -> Result<u64> {
         match self.client.get_token_account_balance(pubkey) {
             Ok(amount) => Ok(amount.amount.parse::<u64>().unwrap_or(0)),
-            Err(error) if is_missing_account_error(&error.to_string()) => Ok(0),
-            Err(error) => Err(anyhow::Error::new(error))
-                .with_context(|| format!("failed to fetch token account balance for {pubkey}")),
+            Err(primary_error) => match self.fallback_client().get_token_account_balance(pubkey) {
+                Ok(amount) => Ok(amount.amount.parse::<u64>().unwrap_or(0)),
+                Err(fallback_error)
+                    if is_missing_account_error(&primary_error.to_string())
+                        || is_missing_account_error(&fallback_error.to_string()) =>
+                {
+                    Ok(0)
+                }
+                Err(fallback_error) => Err(anyhow::anyhow!(
+                    "failed to fetch token account balance for {pubkey}: primary RPC failed ({primary_error}); fallback RPC failed ({fallback_error})"
+                )),
+            },
         }
     }
 
     pub fn get_latest_blockhash(&self) -> Result<Hash> {
         self.client
             .get_latest_blockhash()
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .get_latest_blockhash()
+                    .with_context(|| {
+                        format!(
+                            "failed to fetch latest blockhash from primary RPC ({primary_error}) and fallback RPC"
+                        )
+                    })
+            })
             .context("failed to fetch latest blockhash")
     }
 
     pub fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> Result<u64> {
         self.client
             .get_minimum_balance_for_rent_exemption(data_len)
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .get_minimum_balance_for_rent_exemption(data_len)
+                    .with_context(|| {
+                        format!(
+                            "failed to fetch rent exemption minimum for {data_len} bytes from primary RPC ({primary_error}) and fallback RPC"
+                        )
+                    })
+            })
             .with_context(|| format!("failed to fetch rent exemption minimum for {data_len} bytes"))
     }
 
     pub fn get_fee_for_message(&self, message: &Message) -> Result<u64> {
         self.client
             .get_fee_for_message(message)
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .get_fee_for_message(message)
+                    .with_context(|| {
+                        format!(
+                            "failed to fetch transaction fee preview from primary RPC ({primary_error}) and fallback RPC"
+                        )
+                    })
+            })
             .context("failed to fetch transaction fee preview")
     }
 
     pub fn send_and_confirm_transaction(&self, transaction: &Transaction) -> Result<Signature> {
         self.client
             .send_and_confirm_transaction(transaction)
+            .or_else(|primary_error| {
+                self.fallback_client()
+                    .send_and_confirm_transaction(transaction)
+                    .with_context(|| {
+                        format!(
+                            "failed to send and confirm transaction on primary RPC ({primary_error}) and fallback RPC"
+                        )
+                    })
+            })
             .context("failed to send and confirm transaction")
     }
 
@@ -346,6 +410,13 @@ impl RpcFacade {
         }
 
         Ok(payload)
+    }
+
+    fn fallback_client(&self) -> RpcClient {
+        RpcClient::new_with_commitment(
+            SOLANA_MAINNET_RPC_URL.to_string(),
+            CommitmentConfig::confirmed(),
+        )
     }
 }
 

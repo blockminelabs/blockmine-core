@@ -206,10 +206,7 @@ fn wait_for_funding(cli: &Cli, config: &CliConfig, rpc: &RpcFacade, wallet: &str
     loop {
         let protocol = rpc.fetch_protocol_config()?;
         let current_block = rpc.fetch_current_block()?;
-        let balance_lamports = rpc
-            .client()
-            .get_balance(&wallet_pubkey)
-            .with_context(|| format!("failed to fetch balance for {}", wallet_pubkey))?;
+        let balance_lamports = rpc.get_balance(&wallet_pubkey)?;
 
         if balance_lamports >= required_lamports {
             println!(
