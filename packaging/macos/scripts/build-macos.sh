@@ -24,6 +24,14 @@ fi
 
 mkdir -p "$DIST_DIR"
 
+REPO_ROOT="$(cd "$ROOT" && pwd)"
+HOME_DIR="${HOME:-}"
+REMAP_FLAGS="--remap-path-prefix=$REPO_ROOT=/src/blockmine-core"
+if [[ -n "$HOME_DIR" ]]; then
+  REMAP_FLAGS="$REMAP_FLAGS --remap-path-prefix=$HOME_DIR=/usr/home"
+fi
+export RUSTFLAGS="$REMAP_FLAGS ${RUSTFLAGS:-}"
+
 echo "Building unified Blockmine Miner for macOS ..."
 pushd "$MINER_ROOT" >/dev/null
 cargo build --release --bin blockmine-studio --features opencl

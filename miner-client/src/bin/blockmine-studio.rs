@@ -6,6 +6,7 @@ use std::io::{Cursor, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
+use std::panic;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -35,7 +36,7 @@ use blockmine_program::math::rewards::{reward_era_for_block, ERA_NAME_LEN};
 use eframe::egui::{
     self, Align, Color32, IconData, RichText, TextEdit, TextureHandle, TextureOptions,
 };
-use eframe::{App, Frame, NativeOptions};
+use eframe::{App, Frame, NativeOptions, Renderer};
 use image::codecs::gif::GifDecoder;
 use image::{AnimationDecoder, ImageReader};
 use qrcode::{types::Color as QrColor, QrCode};
@@ -468,12 +469,15 @@ impl MouseParticleFieldState {
 }
 
 fn main() -> eframe::Result<()> {
+    install_panic_hook();
+
     let mut native_options = NativeOptions::default();
     native_options.viewport = egui::ViewportBuilder::default()
         .with_inner_size([1500.0, 980.0])
         .with_min_inner_size([1180.0, 820.0])
         .with_title("BlockMine Studio")
         .with_icon(load_app_icon());
+    native_options.renderer = Renderer::Wgpu;
 
     eframe::run_native(
         "BlockMine Studio",
@@ -2806,6 +2810,26 @@ fn split_seed_phrase_words(phrase: &str) -> Vec<String> {
         .map(|word| word.trim().to_string())
         .filter(|word| !word.is_empty())
         .collect()
+}
+
+fn install_panic_hook() {
+    panic::set_hook(Box::new(|panic_info| {
+        let payload = if let Some(message) = panic_info.payload().downcast_ref::<&str>() {
+            (*message).to_owned()
+        } else if let Some(message) = panic_info.payload().downcast_ref::<String>() {
+            message.clone()
+        } else {
+            "application panic".to_owned()
+        };
+
+        let friendly = if payload.contains("failed to find a matching configuration for creating glutin config") {
+            "Native graphics initialization failed. Please relaunch the miner or update to the latest build.".to_owned()
+        } else {
+            payload
+        };
+
+        eprintln!("Blockmine Miner panic: {friendly}");
+    }));
 }
 
 fn load_wallet_recovery_material(wallet: &ManagedWallet) -> Result<(RecoveryMaterialKind, String)> {

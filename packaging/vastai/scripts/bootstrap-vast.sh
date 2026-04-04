@@ -74,6 +74,12 @@ else
   git -C "${BLOCKMINE_REPO_DIR}" pull --ff-only origin main
 fi
 
+REMAP_FLAGS="--remap-path-prefix=${BLOCKMINE_REPO_DIR}=/src/blockmine-core"
+if [ -n "${HOME:-}" ]; then
+  REMAP_FLAGS="${REMAP_FLAGS} --remap-path-prefix=${HOME}=/usr/home"
+fi
+export RUSTFLAGS="${REMAP_FLAGS} ${RUSTFLAGS:-}"
+
 echo "[blockmine] building worker binaries"
 cargo build --release \
   --manifest-path "${BLOCKMINE_REPO_DIR}/miner-client/Cargo.toml" \

@@ -2,6 +2,7 @@ FROM nvidia/cuda:12.8.0-devel-ubuntu22.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/root/.cargo/bin:${PATH}
+ENV RUSTFLAGS="--remap-path-prefix=/src=/src/blockmine-core --remap-path-prefix=/root=/usr/home"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
