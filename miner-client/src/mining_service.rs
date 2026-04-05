@@ -29,8 +29,8 @@ use crate::submitter;
 const RPC_RETRY_ATTEMPTS: usize = 6;
 const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
-const BLOCK_REFRESH_INTERVAL: Duration = Duration::from_millis(1_500);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const BLOCK_REFRESH_SLEEP_CHUNK: Duration = Duration::from_millis(50);
 
 #[cfg(target_os = "windows")]
 const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
@@ -347,17 +347,23 @@ fn worker_loop(
         .name("blockmine-block-refresh".to_string())
         .spawn(move || {
             let rpc = RpcFacade::new(&block_refresh_config);
+            let mut next_refresh_interval = block_refresh_interval(0);
             while !block_refresh_stop.load(Ordering::Relaxed) {
                 let update =
                     fetch_current_block_with_retry(&rpc).map_err(|error| error.to_string());
+                if let Ok(block) = &update {
+                    next_refresh_interval = block_refresh_interval(block.difficulty_bits);
+                }
                 let _ = block_refresh_sender.send(update);
 
-                let poll_chunks = ((BLOCK_REFRESH_INTERVAL.as_millis() / 100).max(1)) as usize;
+                let poll_chunks =
+                    ((next_refresh_interval.as_millis() / BLOCK_REFRESH_SLEEP_CHUNK.as_millis())
+                        .max(1)) as usize;
                 for _ in 0..poll_chunks {
                     if block_refresh_stop.load(Ordering::Relaxed) {
                         break;
                     }
-                    thread::sleep(Duration::from_millis(100));
+                    thread::sleep(BLOCK_REFRESH_SLEEP_CHUNK);
                 }
             }
         })
@@ -983,6 +989,18 @@ fn friendly_submit_error(
 
 fn should_rotate_stale_block(block: &blockmine_program::state::CurrentBlock) -> bool {
     block.expires_at > 0 && unix_timestamp_now() > block.expires_at
+}
+
+fn block_refresh_interval(difficulty_bits: u8) -> Duration {
+    let millis = match difficulty_bits {
+        0..=16 => 250,
+        17..=20 => 350,
+        21..=24 => 500,
+        25..=28 => 750,
+        29..=32 => 1_000,
+        _ => 1_500,
+    };
+    Duration::from_millis(millis)
 }
 
 fn unix_timestamp_now() -> i64 {
