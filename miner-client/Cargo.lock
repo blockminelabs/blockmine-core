@@ -1261,6 +1261,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anyhow",
+ "base64 0.22.1",
+ "bincode",
  "bip39",
  "blockmine-program",
  "bs58 0.5.1",

@@ -1,5 +1,6 @@
 use anchor_lang::AccountDeserialize;
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use blockmine_program::{
     constants::{
         CONFIG_SEED, CURRENT_BLOCK_SEED, MINER_STATS_SEED, MINING_SESSION_SEED,
@@ -20,6 +21,8 @@ use solana_sdk::{
     signature::Signature,
     transaction::Transaction,
 };
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::config::CliConfig;
 
@@ -28,6 +31,9 @@ pub const SOLANA_MAINNET_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 pub const MINER_STATE_RELAY_URL: &str = "https://blockmine.dev/api/miner/state";
 pub const MINER_WALLET_BALANCES_RELAY_URL: &str =
     "https://blockmine.dev/api/miner/wallet-balances";
+pub const HELIUS_SENDER_URL: &str = "https://sender.helius-rpc.com/fast";
+const SENDER_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
+const SENDER_CONFIRM_POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 pub fn is_miner_state_relay_url(value: &str) -> bool {
     let normalized = value.trim().trim_end_matches('/').to_ascii_lowercase();
@@ -56,6 +62,7 @@ pub fn normalize_raw_rpc_url(value: &str) -> String {
 pub struct RpcFacade {
     client: RpcClient,
     relay_client: Client,
+    sender_url: Option<String>,
     pub program_id: Pubkey,
 }
 
@@ -177,18 +184,49 @@ pub struct RelayWalletBalance {
     pub bloc_balance_raw: String,
 }
 
+#[derive(Debug, serde::Serialize)]
+struct SenderSendTransactionConfig<'a> {
+    encoding: &'a str,
+    #[serde(rename = "skipPreflight")]
+    skip_preflight: bool,
+    #[serde(rename = "maxRetries")]
+    max_retries: u8,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SenderJsonRpcRequest<'a> {
+    jsonrpc: &'a str,
+    id: u8,
+    method: &'a str,
+    params: (&'a str, SenderSendTransactionConfig<'a>),
+}
+
+#[derive(Debug, Deserialize)]
+struct SenderJsonRpcResponse {
+    result: Option<String>,
+    error: Option<SenderJsonRpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SenderJsonRpcError {
+    code: i64,
+    message: String,
+}
+
 impl RpcFacade {
     pub fn new(config: &CliConfig) -> Self {
         Self::from_parts(&normalize_raw_rpc_url(&config.rpc_url), config.program_id, config.commitment)
     }
 
     pub fn from_parts(rpc_url: &str, program_id: Pubkey, commitment: CommitmentConfig) -> Self {
+        let normalized_rpc = normalize_raw_rpc_url(rpc_url);
         Self {
-            client: RpcClient::new_with_commitment(normalize_raw_rpc_url(rpc_url), commitment),
+            client: RpcClient::new_with_commitment(normalized_rpc.clone(), commitment),
             relay_client: Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()
                 .expect("failed to build relay HTTP client"),
+            sender_url: sender_url_for_rpc(&normalized_rpc),
             program_id,
         }
     }
@@ -360,6 +398,12 @@ impl RpcFacade {
     }
 
     pub fn send_and_confirm_transaction(&self, transaction: &Transaction) -> Result<Signature> {
+        if let Some(sender_url) = &self.sender_url {
+            if let Ok(signature) = self.send_and_confirm_via_sender(sender_url, transaction) {
+                return Ok(signature);
+            }
+        }
+
         self.client
             .send_and_confirm_transaction(transaction)
             .or_else(|primary_error| {
@@ -417,6 +461,131 @@ impl RpcFacade {
             SOLANA_MAINNET_RPC_URL.to_string(),
             CommitmentConfig::confirmed(),
         )
+    }
+
+    fn send_and_confirm_via_sender(
+        &self,
+        sender_url: &str,
+        transaction: &Transaction,
+    ) -> Result<Signature> {
+        let serialized = bincode::serialize(transaction)
+            .context("failed to serialize transaction for Helius Sender")?;
+        let encoded = BASE64_STANDARD.encode(serialized);
+        let request = SenderJsonRpcRequest {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "sendTransaction",
+            params: (
+                encoded.as_str(),
+                SenderSendTransactionConfig {
+                    encoding: "base64",
+                    skip_preflight: true,
+                    max_retries: 0,
+                },
+            ),
+        };
+
+        let response = self
+            .relay_client
+            .post(sender_url)
+            .json(&request)
+            .send()
+            .with_context(|| format!("failed to post transaction to Helius Sender at {sender_url}"))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .context("failed to read Helius Sender response body")?;
+
+        if !status.is_success() {
+            anyhow::bail!("Helius Sender returned HTTP {status}: {body}");
+        }
+
+        let payload: SenderJsonRpcResponse = serde_json::from_str(&body)
+            .context("failed to decode Helius Sender JSON-RPC response")?;
+        if let Some(error) = payload.error {
+            anyhow::bail!(
+                "Helius Sender rejected the transaction (code {}): {}",
+                error.code,
+                error.message
+            );
+        }
+
+        let signature = payload
+            .result
+            .context("Helius Sender did not return a transaction signature")?
+            .parse::<Signature>()
+            .context("Helius Sender returned an invalid transaction signature")?;
+
+        self.confirm_signature(&signature)
+            .with_context(|| format!("transaction {signature} did not confirm after Helius Sender broadcast"))?;
+
+        Ok(signature)
+    }
+
+    fn confirm_signature(&self, signature: &Signature) -> Result<()> {
+        let started_at = Instant::now();
+        let mut last_error: Option<anyhow::Error> = None;
+
+        while started_at.elapsed() < SENDER_CONFIRM_TIMEOUT {
+            match self.client.get_signature_status(signature) {
+                Ok(Some(Ok(()))) => return Ok(()),
+                Ok(Some(Err(error))) => {
+                    anyhow::bail!("transaction failed on-chain after sender broadcast: {error}");
+                }
+                Ok(None) => {}
+                Err(primary_error) => {
+                    match self.fallback_client().get_signature_status(signature) {
+                        Ok(Some(Ok(()))) => return Ok(()),
+                        Ok(Some(Err(error))) => {
+                            anyhow::bail!(
+                                "transaction failed on-chain after sender broadcast: {error}"
+                            );
+                        }
+                        Ok(None) => {}
+                        Err(fallback_error) => {
+                            last_error = Some(anyhow::anyhow!(
+                                "failed to confirm signature via primary RPC ({primary_error}) and fallback RPC ({fallback_error})"
+                            ));
+                        }
+                    }
+                }
+            }
+
+            thread::sleep(SENDER_CONFIRM_POLL_INTERVAL);
+        }
+
+        if let Some(error) = last_error {
+            return Err(error);
+        }
+
+        anyhow::bail!(
+            "timed out waiting for transaction {signature} to confirm after sender broadcast"
+        )
+    }
+}
+
+fn sender_url_for_rpc(rpc_url: &str) -> Option<String> {
+    let normalized = rpc_url.trim().to_ascii_lowercase();
+    if normalized.contains("devnet")
+        || normalized.contains("localhost")
+        || normalized.contains("127.0.0.1")
+    {
+        return None;
+    }
+
+    match std::env::var("BLOCKMINE_SENDER_URL") {
+        Ok(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("off")
+                || trimmed.eq_ignore_ascii_case("disabled")
+            {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Err(_) => Some(HELIUS_SENDER_URL.to_string()),
     }
 }
 
