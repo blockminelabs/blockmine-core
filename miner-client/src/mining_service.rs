@@ -34,7 +34,7 @@ const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const BLOCK_REFRESH_SLEEP_CHUNK: Duration = Duration::from_millis(50);
-const LEADERBOARD_CLIENT_VERSION: &str = "native-worker-aware-v1";
+const LEADERBOARD_CLIENT_VERSION: &str = "native-worker-aware-v2";
 
 #[cfg(target_os = "windows")]
 const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
@@ -76,6 +76,7 @@ pub struct MiningSnapshot {
     pub current_block_number: u64,
     pub current_reward: u64,
     pub difficulty_bits: u8,
+    pub session_started_at: u64,
     pub challenge: [u8; 32],
     pub target: [u8; 32],
     pub session_blocks_mined: u64,
@@ -105,6 +106,7 @@ impl Default for MiningSnapshot {
             current_block_number: 0,
             current_reward: 0,
             difficulty_bits: 0,
+            session_started_at: 0,
             challenge: [0u8; 32],
             target: [0u8; 32],
             session_blocks_mined: 0,
@@ -163,6 +165,8 @@ struct LeaderboardHeartbeatPayload {
     current_block_number: u64,
     #[serde(rename = "updatedAt")]
     updated_at: u64,
+    #[serde(rename = "sessionStartedAt")]
+    session_started_at: u64,
     #[serde(rename = "signatureHex")]
     signature_hex: String,
 }
@@ -827,13 +831,14 @@ fn build_leaderboard_heartbeat_payload(
         wallet_blocks_mined: snapshot.wallet_blocks_mined,
         current_block_number: snapshot.current_block_number,
         updated_at: unix_timestamp_now().max(0) as u64,
+        session_started_at: snapshot.session_started_at,
         signature_hex: String::new(),
     }
 }
 
 fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
     [
-        "v4".to_string(),
+        "v5".to_string(),
         payload.miner.clone(),
         payload.reporter.clone(),
         payload.worker_id.clone(),
@@ -849,6 +854,7 @@ fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) ->
         payload.wallet_blocks_mined.to_string(),
         payload.current_block_number.to_string(),
         payload.updated_at.to_string(),
+        payload.session_started_at.to_string(),
     ]
     .join("|")
 }
@@ -897,6 +903,7 @@ impl WorkerState {
                 current_block_number: current_block.block_number,
                 current_reward: current_block.block_reward,
                 difficulty_bits: current_block.difficulty_bits,
+                session_started_at: unix_timestamp_now().max(0) as u64,
                 challenge: current_block.challenge,
                 target: current_block.difficulty_target,
                 session_blocks_mined: 0,
