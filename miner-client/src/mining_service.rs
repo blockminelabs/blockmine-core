@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::fs;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, Receiver},
@@ -9,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use blockmine_program::constants::BLOCK_STATUS_OPEN;
+use rand::RngCore;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use solana_sdk::{
@@ -25,12 +27,14 @@ use crate::miner_loop::{
 };
 use crate::rpc::RpcFacade;
 use crate::submitter;
+use crate::wallet_store::app_storage_dir;
 
 const RPC_RETRY_ATTEMPTS: usize = 6;
 const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const BLOCK_REFRESH_SLEEP_CHUNK: Duration = Duration::from_millis(50);
+const LEADERBOARD_CLIENT_VERSION: &str = "native-worker-aware-v1";
 
 #[cfg(target_os = "windows")]
 const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
@@ -135,6 +139,10 @@ pub enum MiningUpdate {
 struct LeaderboardHeartbeatPayload {
     miner: String,
     reporter: String,
+    #[serde(rename = "workerId")]
+    worker_id: String,
+    #[serde(rename = "clientVersion")]
+    client_version: String,
     backend: String,
     platform: String,
     #[serde(rename = "platformDetail")]
@@ -165,6 +173,8 @@ struct LeaderboardReporter {
     last_sent_at: Option<Instant>,
     miner_pubkey: Pubkey,
     reporter_pubkey: Pubkey,
+    worker_id: String,
+    client_version: String,
     platform_detail: String,
     hardware_summary: String,
 }
@@ -203,6 +213,8 @@ impl LeaderboardReporter {
             last_sent_at: None,
             miner_pubkey,
             reporter_pubkey,
+            worker_id: resolve_leaderboard_worker_id(),
+            client_version: LEADERBOARD_CLIENT_VERSION.to_string(),
             platform_detail: sanitize_metadata_label(platform_detail),
             hardware_summary: sanitize_metadata_label(hardware_summary),
         })
@@ -224,6 +236,8 @@ impl LeaderboardReporter {
         let payload = build_leaderboard_heartbeat_payload(
             self.miner_pubkey,
             self.reporter_pubkey,
+            &self.worker_id,
+            &self.client_version,
             snapshot,
             &self.platform_detail,
             &self.hardware_summary,
@@ -791,6 +805,8 @@ fn format_hashrate_hps(rate_hps: f64) -> String {
 fn build_leaderboard_heartbeat_payload(
     miner_pubkey: Pubkey,
     reporter_pubkey: Pubkey,
+    worker_id: &str,
+    client_version: &str,
     snapshot: &MiningSnapshot,
     platform_detail: &str,
     hardware_summary: &str,
@@ -798,6 +814,8 @@ fn build_leaderboard_heartbeat_payload(
     LeaderboardHeartbeatPayload {
         miner: miner_pubkey.to_string(),
         reporter: reporter_pubkey.to_string(),
+        worker_id: worker_id.to_string(),
+        client_version: client_version.to_string(),
         backend: backend_label(snapshot.backend).to_string(),
         platform: LEADERBOARD_PLATFORM_LABEL.to_string(),
         platform_detail: platform_detail.to_string(),
@@ -815,9 +833,11 @@ fn build_leaderboard_heartbeat_payload(
 
 fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
     [
-        "v3".to_string(),
+        "v4".to_string(),
         payload.miner.clone(),
         payload.reporter.clone(),
+        payload.worker_id.clone(),
+        payload.client_version.clone(),
         payload.backend.clone(),
         payload.platform.clone(),
         payload.platform_detail.clone(),
@@ -989,6 +1009,71 @@ fn friendly_submit_error(
 
 fn should_rotate_stale_block(block: &blockmine_program::state::CurrentBlock) -> bool {
     block.expires_at > 0 && unix_timestamp_now() > block.expires_at
+}
+
+fn resolve_leaderboard_worker_id() -> String {
+    if let Ok(value) = std::env::var("BLOCKMINE_WORKER_ID") {
+        let sanitized = sanitize_worker_fragment(&value);
+        if !sanitized.is_empty() {
+            return sanitized;
+        }
+    }
+
+    let worker_id_path = match app_storage_dir() {
+        Ok(path) => path.join("leaderboard-worker-id.txt"),
+        Err(_) => return fallback_worker_id(),
+    };
+
+    if let Ok(existing) = fs::read_to_string(&worker_id_path) {
+        let sanitized = sanitize_worker_fragment(existing.trim());
+        if !sanitized.is_empty() {
+            return sanitized;
+        }
+    }
+
+    let mut random_bytes = [0u8; 4];
+    rand::thread_rng().fill_bytes(&mut random_bytes);
+    let suffix = hex::encode(random_bytes);
+    let prefix = std::env::var("BLOCKMINE_WORKER_LABEL")
+        .ok()
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .map(|value| sanitize_worker_fragment(&value))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "worker".to_string());
+    let worker_id = format!("{prefix}-{suffix}");
+
+    if let Some(parent) = worker_id_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&worker_id_path, &worker_id);
+
+    worker_id
+}
+
+fn fallback_worker_id() -> String {
+    let mut random_bytes = [0u8; 4];
+    rand::thread_rng().fill_bytes(&mut random_bytes);
+    format!("worker-{}", hex::encode(random_bytes))
+}
+
+fn sanitize_worker_fragment(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .take(48)
+        .collect()
 }
 
 fn block_refresh_interval(difficulty_bits: u8) -> Duration {
