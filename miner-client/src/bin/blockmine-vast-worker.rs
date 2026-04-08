@@ -123,6 +123,7 @@ fn main() -> Result<()> {
             gpu_local_work_size: cli.gpu_local_work_size,
             start_nonce: None,
             miner_override: None,
+            site_url: Some(cli.site_url.clone()),
             leaderboard_ingest_url: ingest_url,
             platform_detail: Some(cli.platform_detail.clone()),
             hardware_summary: Some(hardware_summary),

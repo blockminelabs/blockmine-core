@@ -19,7 +19,7 @@ use blockmine_program::math::rewards::reward_era_for_block;
 use clap::Parser;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use crossterm::style::{Attribute, Print, SetAttribute};
+use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, size, Clear, ClearType,
 };
@@ -347,6 +347,7 @@ impl VastConsole {
                 gpu_local_work_size: self.cli.gpu_local_work_size,
                 start_nonce: None,
                 miner_override: None,
+                site_url: Some(self.cli.site_url.clone()),
                 leaderboard_ingest_url: ingest_url,
                 platform_detail: Some(self.cli.platform_detail.clone()),
                 hardware_summary: Some(self.hardware_summary.clone()),
@@ -521,6 +522,17 @@ impl VastConsole {
             } else {
                 queue!(self.stdout, Print(trim_line(line, width)), Print("\r\n"))?;
             }
+        }
+
+        if let Some(update_warning) = &self.mining_snapshot.update_warning {
+            queue!(
+                self.stdout,
+                Print("\r\n"),
+                SetForegroundColor(Color::Yellow),
+                Print(trim_line(&format!("Warning: {update_warning}"), width)),
+                ResetColor,
+                Print("\r\n")
+            )?;
         }
 
         if !self.wallet_is_funded() {

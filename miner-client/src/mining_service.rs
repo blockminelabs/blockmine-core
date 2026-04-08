@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use blockmine_program::constants::BLOCK_STATUS_OPEN;
 use rand::RngCore;
 use reqwest::blocking::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
@@ -33,8 +33,10 @@ const RPC_RETRY_ATTEMPTS: usize = 6;
 const RPC_RETRY_DELAY: Duration = Duration::from_millis(800);
 const LIVE_HASHRATE_WINDOW: Duration = Duration::from_secs(15);
 const LEADERBOARD_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+const CLIENT_RELEASE_CHECK_INTERVAL: Duration = Duration::from_secs(180);
 const BLOCK_REFRESH_SLEEP_CHUNK: Duration = Duration::from_millis(50);
 const LEADERBOARD_CLIENT_VERSION: &str = "native-worker-aware-v2";
+const DEFAULT_CLIENT_RELEASE_URL: &str = "https://blockmine.dev/api/client-release";
 
 #[cfg(target_os = "windows")]
 const LEADERBOARD_PLATFORM_LABEL: &str = "windows";
@@ -62,6 +64,7 @@ pub struct MiningRuntimeOptions {
     pub gpu_local_work_size: Option<usize>,
     pub start_nonce: Option<u64>,
     pub miner_override: Option<Pubkey>,
+    pub site_url: Option<String>,
     pub leaderboard_ingest_url: Option<String>,
     pub platform_detail: Option<String>,
     pub hardware_summary: Option<String>,
@@ -88,6 +91,7 @@ pub struct MiningSnapshot {
     pub protocol_treasury_fees: u64,
     pub last_hashrate: String,
     pub last_hashrate_hps: f64,
+    pub update_warning: Option<String>,
     pub last_nonce: Option<u64>,
     pub last_hash: Option<[u8; 32]>,
     pub last_signature: Option<String>,
@@ -118,6 +122,7 @@ impl Default for MiningSnapshot {
             protocol_treasury_fees: 0,
             last_hashrate: "-".to_string(),
             last_hashrate_hps: 0.0,
+            update_warning: None,
             last_nonce: None,
             last_hash: None,
             last_signature: None,
@@ -181,6 +186,22 @@ struct LeaderboardReporter {
     client_version: String,
     platform_detail: String,
     hardware_summary: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ClientReleasePayload {
+    ok: bool,
+    #[serde(rename = "nativeClientVersion")]
+    native_client_version: String,
+    #[serde(rename = "nativeWarning")]
+    native_warning: Option<String>,
+}
+
+struct ClientReleaseMonitor {
+    client: Option<Client>,
+    release_url: Option<String>,
+    last_checked_at: Option<Instant>,
+    current_warning: Option<String>,
 }
 
 impl LeaderboardReporter {
@@ -401,10 +422,19 @@ fn worker_loop(
         options.platform_detail.clone(),
         options.hardware_summary.clone(),
     )?;
+    let mut client_release_monitor = ClientReleaseMonitor::new(
+        options.site_url.clone(),
+        options.leaderboard_ingest_url.clone(),
+    )?;
+    client_release_monitor.maybe_refresh();
+    state.snapshot.update_warning = client_release_monitor.current_warning.clone();
     state.emit(sender, latest_snapshot);
     leaderboard_reporter.maybe_send(&signer, &state.snapshot, true);
 
     while !stop_requested.load(Ordering::Relaxed) {
+        client_release_monitor.maybe_refresh();
+        state.snapshot.update_warning = client_release_monitor.current_warning.clone();
+
         while let Ok(update) = block_refresh_receiver.try_recv() {
             match update {
                 Ok(block) => {
@@ -836,6 +866,77 @@ fn build_leaderboard_heartbeat_payload(
     }
 }
 
+impl ClientReleaseMonitor {
+    fn new(site_url: Option<String>, leaderboard_ingest_url: Option<String>) -> Result<Self> {
+        let release_url = site_url
+            .as_deref()
+            .and_then(derive_client_release_url)
+            .or_else(|| {
+                leaderboard_ingest_url
+                    .as_deref()
+                    .and_then(derive_client_release_url_from_ingest_url)
+            })
+            .or_else(|| Some(DEFAULT_CLIENT_RELEASE_URL.to_string()));
+
+        let client = if release_url.is_some() {
+            Some(
+                Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .user_agent("Blockmine Miner/1.0 (+https://blockmine.dev)")
+                    .build()
+                    .context("failed to build the client release HTTP client")?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            client,
+            release_url,
+            last_checked_at: None,
+            current_warning: None,
+        })
+    }
+
+    fn maybe_refresh(&mut self) {
+        if self.client.is_none() || self.release_url.is_none() {
+            return;
+        }
+
+        if self
+            .last_checked_at
+            .is_some_and(|last_checked_at| last_checked_at.elapsed() < CLIENT_RELEASE_CHECK_INTERVAL)
+        {
+            return;
+        }
+
+        let response = if let (Some(client), Some(url)) = (&self.client, &self.release_url) {
+            client
+                .get(url)
+                .send()
+                .and_then(|response| response.error_for_status())
+                .and_then(|response| response.json::<ClientReleasePayload>())
+        } else {
+            return;
+        };
+
+        if let Ok(payload) = response {
+            if payload.ok && payload.native_client_version.trim() != LEADERBOARD_CLIENT_VERSION {
+                self.current_warning = Some(
+                    payload
+                        .native_warning
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| "New version available, please update this instance.".to_string()),
+                );
+            } else {
+                self.current_warning = None;
+            }
+        }
+
+        self.last_checked_at = Some(Instant::now());
+    }
+}
+
 fn build_leaderboard_heartbeat_message(payload: &LeaderboardHeartbeatPayload) -> String {
     [
         "v5".to_string(),
@@ -915,6 +1016,7 @@ impl WorkerState {
                 protocol_treasury_fees: protocol.total_treasury_fees_distributed,
                 last_hashrate: "-".to_string(),
                 last_hashrate_hps: 0.0,
+                update_warning: None,
                 last_nonce: None,
                 last_hash: None,
                 last_signature: None,
@@ -1081,6 +1183,41 @@ fn sanitize_worker_fragment(value: &str) -> String {
         .chars()
         .take(48)
         .collect()
+}
+
+fn derive_site_origin(raw_url: &str) -> Option<String> {
+    let trimmed = raw_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let scheme_index = trimmed.find("://")?;
+    let authority_start = scheme_index + 3;
+    let path_start = trimmed[authority_start..]
+        .find('/')
+        .map(|offset| authority_start + offset);
+
+    Some(match path_start {
+        Some(index) => trimmed[..index].to_string(),
+        None => trimmed.to_string(),
+    })
+}
+
+fn derive_client_release_url(raw_url: &str) -> Option<String> {
+    derive_site_origin(raw_url).map(|origin| format!("{origin}/api/client-release"))
+}
+
+fn derive_client_release_url_from_ingest_url(raw_url: &str) -> Option<String> {
+    let trimmed = raw_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(origin) = trimmed.strip_suffix("/api/leaderboard/heartbeat") {
+        return Some(format!("{origin}/api/client-release"));
+    }
+
+    derive_client_release_url(trimmed)
 }
 
 fn block_refresh_interval(difficulty_bits: u8) -> Duration {

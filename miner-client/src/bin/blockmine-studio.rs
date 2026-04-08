@@ -1516,6 +1516,7 @@ impl BlockMineStudioApp {
             )?,
             start_nonce: None,
             miner_override,
+            site_url: derive_site_origin(&self.browser_mine_url),
             leaderboard_ingest_url: derive_leaderboard_ingest_url(&self.browser_mine_url),
             platform_detail: None,
             hardware_summary: None,
@@ -1812,6 +1813,10 @@ impl App for BlockMineStudioApp {
                         theme_error()
                     };
                     ui.colored_label(error_color, error);
+                }
+                if let Some(update_warning) = &self.latest_snapshot.update_warning {
+                    ui.add_space(6.0);
+                    ui.colored_label(theme_accent(), update_warning);
                 }
                 ui.add_space(10.0);
             });
