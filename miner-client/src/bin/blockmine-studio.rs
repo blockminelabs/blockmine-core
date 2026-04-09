@@ -63,9 +63,10 @@ const WALLET_MANAGER_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 #[cfg(target_os = "windows")]
 const DESKTOP_PLATFORM_LABEL: &str = "Windows Miner";
 #[cfg(target_os = "macos")]
-const DESKTOP_PLATFORM_LABEL: &str = "MacOS Miner";
+const DESKTOP_PLATFORM_LABEL: &str = "macOS Miner";
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 const DESKTOP_PLATFORM_LABEL: &str = "Desktop Miner";
+const DESKTOP_CLIENT_VERSION_LABEL: &str = "v2";
 
 #[derive(Clone, Copy)]
 struct EraScheduleRow {
@@ -1796,7 +1797,7 @@ impl App for BlockMineStudioApp {
                         egui::Layout::bottom_up(Align::Min),
                         |ui| {
                             ui.label(
-                                RichText::new(DESKTOP_PLATFORM_LABEL)
+                                RichText::new(format!("{DESKTOP_PLATFORM_LABEL} • {DESKTOP_CLIENT_VERSION_LABEL}"))
                                     .size(13.0)
                                     .color(theme_accent()),
                             );
