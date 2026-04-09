@@ -1792,17 +1792,7 @@ impl App for BlockMineStudioApp {
                         }
                     }
                     ui.add_space(10.0);
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(150.0, 44.0),
-                        egui::Layout::bottom_up(Align::Min),
-                        |ui| {
-                            ui.label(
-                                RichText::new(format!("{DESKTOP_PLATFORM_LABEL} • {DESKTOP_CLIENT_VERSION_LABEL}"))
-                                    .size(13.0)
-                                    .color(theme_accent()),
-                            );
-                        },
-                    );
+                    render_desktop_platform_badge(ui);
                 });
                 ui.add_space(8.0);
                 ui.label(RichText::new(&self.status).color(theme_text()));
@@ -3380,6 +3370,29 @@ fn render_brand_header(
             ui.heading(RichText::new("BlockMine").size(30.0).color(theme_text()));
         }
     });
+}
+
+fn render_desktop_platform_badge(ui: &mut egui::Ui) {
+    egui::Frame::none()
+        .fill(Color32::from_rgba_premultiplied(24, 18, 13, 210))
+        .stroke(egui::Stroke::new(1.2, theme_accent()))
+        .rounding(egui::Rounding::same(10.0))
+        .inner_margin(egui::Margin::symmetric(12.0, 7.0))
+        .show(ui, |ui| {
+            ui.set_min_size(egui::vec2(150.0, 44.0));
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(DESKTOP_PLATFORM_LABEL)
+                        .size(13.0)
+                        .color(theme_accent()),
+                );
+                ui.label(
+                    RichText::new(format!("Version {DESKTOP_CLIENT_VERSION_LABEL}"))
+                        .size(11.5)
+                        .color(theme_muted()),
+                );
+            });
+        });
 }
 
 fn render_animated_texture(
@@ -5096,3 +5109,6 @@ fn derive_site_origin(raw_url: &str) -> Option<String> {
 fn derive_leaderboard_ingest_url(raw_url: &str) -> Option<String> {
     derive_site_origin(raw_url).map(|origin| format!("{origin}/api/leaderboard/heartbeat"))
 }
+
+
+

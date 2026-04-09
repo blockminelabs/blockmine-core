@@ -236,11 +236,31 @@ impl RpcFacade {
     }
 
     pub fn fetch_protocol_config(&self) -> Result<ProtocolConfig> {
-        Ok(self.fetch_relay_state()?.config.try_into()?)
+        match self.fetch_relay_state() {
+            Ok(payload) => Ok(payload.config.try_into()?),
+            Err(relay_error) => {
+                let (config_pda, _) = self.config_pda();
+                self.fetch_anchor_account::<ProtocolConfig>(&config_pda).with_context(|| {
+                    format!(
+                        "failed to fetch the Blockmine relay state ({relay_error}); fallback to on-chain config failed"
+                    )
+                })
+            }
+        }
     }
 
     pub fn fetch_current_block(&self) -> Result<CurrentBlock> {
-        Ok(self.fetch_relay_state()?.current_block.try_into()?)
+        match self.fetch_relay_state() {
+            Ok(payload) => Ok(payload.current_block.try_into()?),
+            Err(relay_error) => {
+                let (block_pda, _) = self.current_block_pda();
+                self.fetch_anchor_account::<CurrentBlock>(&block_pda).with_context(|| {
+                    format!(
+                        "failed to fetch the Blockmine relay state ({relay_error}); fallback to on-chain block failed"
+                    )
+                })
+            }
+        }
     }
 
     pub fn fetch_wallet_balances(
